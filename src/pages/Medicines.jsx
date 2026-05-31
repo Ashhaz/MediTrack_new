@@ -274,27 +274,32 @@ function Medicines() {
 
         const nextMedicines = currentMedicines.map((medicine) => {
           if (!isMedicineScheduledOnDate(medicine, new Date()) || !medicine?.scheduleTimes) return medicine;
+          
+          let medCopy = { ...medicine };
+          let medChanged = false;
 
-          medicine?.scheduleTimes?.forEach(time => {
+          medCopy.scheduleTimes.forEach(time => {
             const reminderMinutes = parseReminderTime(time)
-            const doseStatus = getDoseStatus(medicine, time, minutesNow)
+            const doseStatus = getDoseStatus(medCopy, time, minutesNow)
             
             if (doseStatus === "Upcoming") {
               const isDueWindow = minutesNow >= reminderMinutes && minutesNow <= reminderMinutes + REMINDER_WINDOW_MINUTES
-              if (isDueWindow && medicine.notificationSentFor !== `${todayKey}-${time}`) {
-                notifyDoseDue(medicine)
+              if (isDueWindow && medCopy.notificationSentFor !== `${todayKey}-${time}`) {
+                notifyDoseDue(medCopy)
                 didChange = true
-                medicine.notificationSentFor = `${todayKey}-${time}`
+                medChanged = true
+                medCopy.notificationSentFor = `${todayKey}-${time}`
               }
             }
             
-            if (doseStatus === "Missed" && !medicine?.adherenceHistory?.some(h => h.date === todayKey && h.time === time)) {
+            if (doseStatus === "Missed" && !(medCopy.adherenceHistory || []).some(h => h.date === todayKey && h.time === time)) {
               didChange = true
-              medicine.adherenceHistory = [...(medicine.adherenceHistory || []), { date: todayKey, time, status: "Missed" }]
+              medChanged = true
+              medCopy.adherenceHistory = [...(medCopy.adherenceHistory || []), { date: todayKey, time, status: "Missed" }]
             }
           })
 
-          return medicine
+          return medChanged ? medCopy : medicine
         })
 
         return didChange ? nextMedicines : currentMedicines

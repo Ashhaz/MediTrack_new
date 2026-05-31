@@ -58,6 +58,7 @@ function MedicineCard({
   reminderTimes = [],
   accentIndex = 0,
   onMarkTaken,
+  onMarkMissed,
   onEdit,
   onRefill,
   onRestart,
@@ -92,6 +93,11 @@ function MedicineCard({
 
   const confirmTaken = () => {
     onMarkTaken(id)
+    setShowConfirm(false)
+  }
+
+  const confirmMissed = () => {
+    onMarkMissed(id)
     setShowConfirm(false)
   }
 
@@ -216,18 +222,24 @@ function MedicineCard({
               Did you take this medicine at {time}?
             </p>
 
-            <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
               <button
                 onClick={cancelTaken}
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-emerald-300/30 hover:bg-white/10"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs font-bold text-slate-200 transition hover:bg-white/10"
               >
-                No
+                Cancel
+              </button>
+              <button
+                onClick={confirmMissed}
+                className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs font-bold text-rose-400 transition hover:bg-rose-500/20"
+              >
+                Mark Missed
               </button>
               <button
                 onClick={confirmTaken}
-                className="rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-950/30 transition hover:-translate-y-0.5 hover:from-emerald-300 hover:to-green-400"
+                className="rounded-xl bg-gradient-to-r from-emerald-400 to-green-500 px-4 py-3 text-xs font-bold text-white shadow-lg transition hover:-translate-y-0.5 hover:from-emerald-300 hover:to-green-400"
               >
-                Yes, taken
+                Mark Taken
               </button>
             </div>
           </div>

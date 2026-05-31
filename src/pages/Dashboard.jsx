@@ -20,6 +20,7 @@ import {
   formatTimeForStorage, 
   formatTimeForDisplay 
 } from "../utils/medicineUtils.js"
+import { calculateWeeklyAdherence } from "../utils/adherenceUtils.js"
 import MedicineName from "../components/MedicineName"
 import { getStockStatus } from "../utils/stockUtils.js"
 
@@ -389,15 +390,6 @@ function Dashboard() {
     let lowStockCount = 0
     let upcomingCount = 0
 
-    // Weekly Calculation Logic
-    let weeklyTotal = 0;
-    let weeklyCompleted = 0;
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      return d.toISOString().slice(0, 10);
-    });
-
     // Streak Logic
     let streak = 0;
     const history = medicineList.filter(m => !m.archived);
@@ -460,19 +452,9 @@ function Dashboard() {
       })
     })
 
-    // Aggregate Weekly
-    history.forEach(med => {
-      last7Days.forEach(date => {
-        if (isMedicineScheduledOnDate(med, new Date(date))) { // Check if scheduled on this specific date
-          weeklyTotal += med.scheduleTimes.length;
-          weeklyCompleted += (med.adherenceHistory || []).filter(h => h.date === date && h.status === "Taken").length;
-        }
-      });
-    });
-
-    total = total || 1
-    const weeklyPercentage = weeklyTotal > 0 ? Math.round((weeklyCompleted / weeklyTotal) * 100) : 100;
-    const dailyScore = Math.min(100, Math.max(0, Math.round(((completed + (total - completed - missed) * 0.5) / (total || 1)) * 100)));
+    const actualTotal = total;
+    const weeklyPercentage = calculateWeeklyAdherence(medicineList);
+    const dailyScore = Math.min(100, Math.max(0, Math.round(((completed + (actualTotal - completed - missed) * 0.5) / (actualTotal || 1)) * 100)));
 
     return {
       completed,
@@ -482,7 +464,7 @@ function Dashboard() {
       streak,
       dailyScore,
       lowStockCount,
-      totalDosesToday: total,
+      totalDosesToday: actualTotal,
       totalActiveMeds,
       tomorrowDoses,
       busiestTime,
@@ -490,6 +472,8 @@ function Dashboard() {
       nextRunningOut
     }
   }, [medicineList])
+
+  const hasAdherenceData = adherenceStats.weeklyPercentage !== null;
 
   const requestNotificationPermission = async () => {
     if (!("Notification" in window)) {
@@ -575,6 +559,40 @@ function Dashboard() {
     ])
   }
 
+  const markMedicineMissed = (medicineId) => {
+    setMedicineList((current) =>
+      current.map((medicine) => {
+        if (medicine.id !== medicineId) {
+          return medicine
+        }
+        
+        const todayKey = getTodayKey()
+        const doseToMark = medicine.scheduleTimes.find(t => {
+          const status = getDoseStatus(medicine, t)
+          return status !== "Taken" && status !== "Missed"
+        })
+
+        if (!doseToMark) {
+          return medicine
+        }
+
+        // Filter out any existing entries for this specific time
+        const cleanHistory = (medicine.adherenceHistory || []).filter(
+          h => !(h.date === todayKey && h.time === doseToMark)
+        )
+
+        return {
+          ...medicine,
+          adherenceHistory: [
+            ...cleanHistory,
+            { date: todayKey, time: doseToMark, status: "Missed" }
+          ],
+          updatedAt: Date.now()
+        }
+      }),
+    )
+  }
+
   const markMedicineTaken = (medicineId) => {
     setMedicineList((current) =>
       current.map((medicine) => {
@@ -587,10 +605,11 @@ function Dashboard() {
 
         if (!doseToMark) {
           // Unmark the last dose of the day if all are completed
+          const lastEntry = (medicine.adherenceHistory || []).find(h => h.date === todayKey && h.time === medicine.scheduleTimes[medicine.scheduleTimes.length - 1]);
           const lastDoseTime = medicine.scheduleTimes[medicine.scheduleTimes.length - 1]
           return {
             ...medicine,
-            stock: (medicine.stock || 0) + 1,
+            stock: (medicine.stock || 0) + (lastEntry?.status === 'Taken' ? 1 : 0),
             adherenceHistory: (medicine.adherenceHistory || []).filter(
               h => !(h.date === todayKey && h.time === lastDoseTime)
             ),
@@ -829,11 +848,29 @@ function Dashboard() {
             <div className="relative h-24 w-24 flex items-center justify-center">
               <svg className="absolute h-full w-full -rotate-90">
                 <circle cx="48" cy="48" r="44" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-white/5" />
-                <circle cx="48" cy="48" r="44" stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray={276} strokeDashoffset={276 - (276 * (adherenceStats.weeklyPercentage || 0)) / 100} strokeLinecap="round" className="text-emerald-500 transition-all duration-1000" />
+                <circle 
+                  cx="48" 
+                  cy="48" 
+                  r="44" 
+                  stroke="currentColor" 
+                  strokeWidth="8" 
+                  fill="transparent" 
+                  strokeDasharray={276} 
+                  strokeDashoffset={276 - (276 * (adherenceStats.weeklyPercentage || 0)) / 100} 
+                  strokeLinecap="round" 
+                  className={`${hasAdherenceData ? 'text-emerald-500' : 'text-white/10'} transition-all duration-1000`} 
+                />
               </svg>
-              <p className="text-2xl font-black text-white">{adherenceStats.weeklyPercentage}%</p>
+              <p className={`${hasAdherenceData ? 'text-2xl' : 'text-sm'} font-black text-white`}>
+                {hasAdherenceData ? `${adherenceStats.weeklyPercentage}%` : "No Data"}
+              </p>
             </div>
             <p className="mt-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">7-Day Adherence</p>
+            {!hasAdherenceData && (
+              <p className="mt-1 text-[9px] text-slate-500 text-center leading-tight max-w-[120px]">
+                Add medicines to start tracking
+              </p>
+            )}
           </div>
         </div>
 
@@ -875,6 +912,7 @@ function Dashboard() {
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={() => markMedicineTaken(priorityDose.medicine.id)} className="flex items-center gap-2 rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-black transition hover:bg-amber-400"><CheckCircle2 size={18} /> Take Now</button>
+                <button onClick={() => markMedicineMissed(priorityDose.medicine.id)} className="flex items-center gap-2 rounded-xl bg-rose-500/10 border border-rose-500/20 px-6 py-3 text-sm font-bold text-rose-400 transition hover:bg-rose-500/20"><XCircle size={18} /> Missed</button>
               </div>
             </div>
           </div>
@@ -956,6 +994,7 @@ function Dashboard() {
                 status={medicine.status}
                 accentIndex={index}
                 onMarkTaken={markMedicineTaken}
+                onMarkMissed={markMedicineMissed}
                 onEdit={() => openEditModal(medicine)}
                 onRefill={() => handleRefill(medicine.id)}
                 onRestart={() => handleRestart(medicine.id)}
@@ -996,48 +1035,57 @@ function Dashboard() {
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/5">
                 <div 
                   className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-1000" 
-                  style={{ width: `${(adherenceStats.completed / adherenceStats.totalDosesToday) * 100}%` }}
+                  style={{ width: `${(adherenceStats.completed / (adherenceStats.totalDosesToday || 1)) * 100}%` }}
                 />
               </div>
             </div>
 
             <div className="grid gap-3">
-            {upcomingReminders.length === 0 ? (
-              <div className="rounded-2xl border border-emerald-300/15 bg-emerald-400/10 p-6 text-sm font-semibold text-emerald-100 shadow-lg shadow-emerald-950/20">
-                All medications for today have been completed.
-              </div>
-            ) : (
-              upcomingReminders.map((item, idx) => (
-                <div
-                  key={`${item.displayTime}-${item.name}`}
-                  className="group grid gap-4 rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:border-emerald-500/20 hover:bg-emerald-500/5 sm:grid-cols-[100px_1fr_auto] sm:items-center"
-                >
-                  <p className="text-xl font-black text-white">{item.displayTime}</p>
-                  <div className="min-w-0">
-                    <div className="text-lg font-bold text-slate-100 group-hover:text-white flex min-w-0">
-                      <MedicineName name={item.name} truncate={true} />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-3 text-[10px] font-bold uppercase tracking-tight text-slate-500">
-                      <span>{item.dosage}</span>
-                      <span className="h-1 w-1 rounded-full bg-white/10" />
-                      <span className="text-emerald-500/80">{item.mealTiming}</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <span
-                      className={`rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-widest shadow-sm ${
-                        statusStyles[item.status] || statusStyles.Upcoming
-                      }`}
-                    >
-                      {item.status}
-                    </span>
-                    <p className={`text-[9px] font-bold uppercase ${item.stock <= 5 ? 'text-rose-400' : 'text-slate-600'}`}>
-                      {item.stock} left
-                    </p>
-                  </div>
+              {adherenceStats.totalDosesToday === 0 ? (
+                <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-6 text-sm font-semibold text-slate-400 shadow-lg">
+                  No medications scheduled for today.
                 </div>
-              ))
-            )}
+              ) : adherenceStats.completed >= adherenceStats.totalDosesToday ? (
+                <div className="rounded-2xl border border-emerald-300/15 bg-emerald-400/10 p-6 text-sm font-semibold text-emerald-100 shadow-lg shadow-emerald-950/20">
+                  All medications for today have been completed.
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-6 text-sm font-semibold text-slate-400 shadow-lg mb-3">
+                    {adherenceStats.totalDosesToday - adherenceStats.completed} {adherenceStats.totalDosesToday - adherenceStats.completed === 1 ? 'medication' : 'medications'} remaining today.
+                  </div>
+                  {upcomingReminders.map((item) => (
+                    <div
+                      key={`${item.displayTime}-${item.name}`}
+                      className="group grid gap-4 rounded-2xl border border-white/10 bg-black/25 p-5 transition duration-300 hover:border-emerald-500/20 hover:bg-emerald-500/5 sm:grid-cols-[100px_1fr_auto] sm:items-center mb-3 last:mb-0"
+                    >
+                      <p className="text-xl font-black text-white">{item.displayTime}</p>
+                      <div className="min-w-0">
+                        <div className="text-lg font-bold text-slate-100 group-hover:text-white flex min-w-0">
+                          <MedicineName name={item.name} truncate={true} />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 text-[10px] font-bold uppercase tracking-tight text-slate-500">
+                          <span>{item.dosage}</span>
+                          <span className="h-1 w-1 rounded-full bg-white/10" />
+                          <span className="text-emerald-500/80">{item.mealTiming}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        <span
+                          className={`rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-widest shadow-sm ${
+                            statusStyles[item.status] || statusStyles.Upcoming
+                          }`}
+                        >
+                          {item.status}
+                        </span>
+                        <p className={`text-[9px] font-bold uppercase ${item.stock <= 5 ? 'text-rose-400' : 'text-slate-600'}`}>
+                          {item.stock} left
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           </div>
 

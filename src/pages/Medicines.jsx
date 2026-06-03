@@ -6,7 +6,7 @@ import {
   parseReminderTime, 
   getMinutesNow, 
   formatTimeForStorage, 
-  formatTimeForDisplay, 
+  formatTimeForDisplay,
   isMedicineScheduledOnDate 
 } from "../utils/medicineUtils.js"
 
@@ -69,7 +69,7 @@ const formatDuration = (minutes) => {
   return `${hours}h ${mins}m`
 }
 
-const getDoseStatus = (medicine, time, minutesNow = getMinutesNow()) => {
+const getDoseStatus = (medicine, time, minutesNow = getMinutesNow(), lastReset = 0) => {
   const todayKey = getTodayKey()
   const isTakenToday = (medicine?.adherenceHistory || []).some(
     h => h.date === todayKey && h.time === time && h.status === "Taken"
@@ -81,7 +81,15 @@ const getDoseStatus = (medicine, time, minutesNow = getMinutesNow()) => {
   if (reminderMinutes === null) {
     return "Upcoming"
   }
-  return minutesNow > reminderMinutes ? "Missed" : "Upcoming"
+
+  // Ignore Missed status if scheduled before history reset
+  const doseDateTime = new Date(`${todayKey}T${time}`).getTime()
+  if (doseDateTime < lastReset) return "Upcoming"
+
+  if (minutesNow >= reminderMinutes && minutesNow <= reminderMinutes + REMINDER_WINDOW_MINUTES) return "Due Now"
+  if (minutesNow > reminderMinutes + REMINDER_WINDOW_MINUTES && minutesNow < reminderMinutes + 120) return "Delayed"
+  if (minutesNow >= reminderMinutes + 120) return "Missed"
+  return "Upcoming"
 }
 
 const enrichMedicine = (medicine, minutesNow = getMinutesNow()) => {
@@ -89,9 +97,11 @@ const enrichMedicine = (medicine, minutesNow = getMinutesNow()) => {
   const scheduleTimes = Array.isArray(medicine.scheduleTimes)
     ? medicine.scheduleTimes
     : ["08:00"]
+  
+  const historyCleared = Number(localStorage.getItem("meditrack.historyCleared") || 0)
   const doses = scheduleTimes.map((t) => ({
     time: t,
-    status: getDoseStatus(medicine, t, minutesNow),
+    status: getDoseStatus(medicine, t, minutesNow, historyCleared),
   }))
   const activeDose =
     doses.find((d) => d.status !== "Taken") ||
@@ -112,6 +122,7 @@ const normalizeMedicine = (medicine, minutesNow = getMinutesNow()) => {
 
   const scheduleTimes = medicine.scheduleTimes || medicine.reminderTimes || [medicine.time || "08:00"]
   const dosesPerDay = medicine.dosesPerDay || (
+    medicine?.dosageFrequency === "Four Times Daily" ? 4 :
     medicine?.dosageFrequency === "Three Times Daily" ? 3 :
     medicine?.dosageFrequency === "Twice Daily" ? 2 : 1
   );
@@ -132,20 +143,6 @@ const normalizeMedicine = (medicine, minutesNow = getMinutesNow()) => {
     adherenceHistory: Array.isArray(medicine.adherenceHistory) ? medicine.adherenceHistory : [],
     updatedAt: medicine.updatedAt || Date.now()
   }
-}
-
-const notifyDoseDue = (medicine) => {
-  if (!("Notification" in window) || Notification.permission !== "granted") {
-    return false
-  }
-
-  new Notification("Medication reminder", {
-    body: `It is time to take ${medicine.name}${
-      medicine.dosage ? `, ${medicine.dosage}` : ""
-    }. Mark it as taken when complete.`,
-    tag: `meditrack-${medicine.id}-${getTodayKey()}`,
-  })
-  return true
 }
 
 const getDoseTimingLabel = (medicine, minutesNow = getMinutesNow()) => {
@@ -201,12 +198,9 @@ const getHistorySummary = (medicine) => {
 const getInitialMedicines = () => {
   const savedMedicines = localStorage.getItem(STORAGE_KEY)
   const minutesNow = getMinutesNow()
-  const fallbackMedicines = medicines
-    .map((medicine) => normalizeMedicine(medicine, minutesNow))
-    .filter(Boolean)
 
   if (!savedMedicines) {
-    return fallbackMedicines
+    return []
   }
 
   try {
@@ -215,11 +209,14 @@ const getInitialMedicines = () => {
       ? parsedMedicines
           .map((medicine) => normalizeMedicine(medicine, minutesNow))
           .filter(Boolean)
-      : fallbackMedicines
+      : []
   } catch {
-    return fallbackMedicines
+    return []
   }
 }
+
+const medicineListsMatch = (firstList, secondList) =>
+  JSON.stringify(firstList) === JSON.stringify(secondList)
 
 function Medicines() {
   const [medicineList, setMedicineList] = useState(getInitialMedicines)
@@ -238,7 +235,27 @@ function Medicines() {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(medicineList))
+    window.dispatchEvent(new Event("meditrack-data-updated"))
   }, [medicineList])
+
+  useEffect(() => {
+    const syncMedicinesFromStorage = () => {
+      const storedMedicines = getInitialMedicines()
+      setMedicineList((currentMedicines) =>
+        medicineListsMatch(currentMedicines, storedMedicines)
+          ? currentMedicines
+          : storedMedicines,
+      )
+    }
+
+    window.addEventListener("meditrack-data-updated", syncMedicinesFromStorage)
+    window.addEventListener("storage", syncMedicinesFromStorage)
+
+    return () => {
+      window.removeEventListener("meditrack-data-updated", syncMedicinesFromStorage)
+      window.removeEventListener("storage", syncMedicinesFromStorage)
+    }
+  }, [])
 
   const handleRefill = (medicineId) => {
     const med = medicineList.find((m) => m.id === medicineId)
@@ -263,54 +280,6 @@ function Medicines() {
       setRefillSuccess(false)
     }, 1200)
   }
-
-  useEffect(() => {
-    const checkReminders = () => {
-      const todayKey = getTodayKey()
-      const minutesNow = getMinutesNow()
-
-      setMedicineList((currentMedicines) => {
-        let didChange = false
-
-        const nextMedicines = currentMedicines.map((medicine) => {
-          if (!isMedicineScheduledOnDate(medicine, new Date()) || !medicine?.scheduleTimes) return medicine;
-          
-          let medCopy = { ...medicine };
-          let medChanged = false;
-
-          medCopy.scheduleTimes.forEach(time => {
-            const reminderMinutes = parseReminderTime(time)
-            const doseStatus = getDoseStatus(medCopy, time, minutesNow)
-            
-            if (doseStatus === "Upcoming") {
-              const isDueWindow = minutesNow >= reminderMinutes && minutesNow <= reminderMinutes + REMINDER_WINDOW_MINUTES
-              if (isDueWindow && medCopy.notificationSentFor !== `${todayKey}-${time}`) {
-                notifyDoseDue(medCopy)
-                didChange = true
-                medChanged = true
-                medCopy.notificationSentFor = `${todayKey}-${time}`
-              }
-            }
-            
-            if (doseStatus === "Missed" && !(medCopy.adherenceHistory || []).some(h => h.date === todayKey && h.time === time)) {
-              didChange = true
-              medChanged = true
-              medCopy.adherenceHistory = [...(medCopy.adherenceHistory || []), { date: todayKey, time, status: "Missed" }]
-            }
-          })
-
-          return medChanged ? medCopy : medicine
-        })
-
-        return didChange ? nextMedicines : currentMedicines
-      })
-    }
-
-    checkReminders()
-    const reminderTimer = window.setInterval(checkReminders, 30000)
-
-    return () => window.clearInterval(reminderTimer)
-  }, [])
 
   const stats = useMemo(() => {
     const activeList = medicineList.filter(m => isMedicineScheduledOnDate(m, new Date()));
@@ -504,7 +473,7 @@ function Medicines() {
   }
 
   return (
-    <>
+    <div className="min-h-screen w-full bg-[#04110f] text-white p-1">
       <style>
         {`
           @keyframes modalIn {
@@ -1103,7 +1072,7 @@ function Medicines() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
 

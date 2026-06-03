@@ -40,20 +40,20 @@ function AppShell({ children }) {
       <div className="fixed bottom-[-10rem] left-72 -z-10 h-96 w-96 rounded-full bg-emerald-700/10 blur-3xl pointer-events-none" />
 
       <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="border-b border-white/10 bg-white/[0.045] px-5 py-5 shadow-2xl shadow-slate-950/20 backdrop-blur-xl lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:border-b-0 lg:border-r">
+        <aside className="border-b border-white/10 bg-white/[0.045] px-4 py-3 shadow-2xl shadow-slate-950/20 backdrop-blur-xl sm:px-5 sm:py-4 lg:sticky lg:top-0 lg:w-72 lg:border-b-0 lg:border-r lg:px-5 lg:py-5">
           <div className="flex items-center gap-3">
-            <span className="grid h-11 w-11 place-items-center rounded-2xl border border-emerald-200/15 bg-emerald-400/10 shadow-lg shadow-emerald-950/25">
+            <span className="grid h-10 w-10 place-items-center rounded-xl border border-emerald-200/15 bg-emerald-400/10 shadow-lg shadow-emerald-950/25 lg:h-11 lg:w-11 lg:rounded-2xl">
               <span className="h-3 w-3 rounded-full bg-emerald-200 shadow-[0_0_18px_rgba(110,231,183,0.5)]" />
             </span>
             <div>
-              <p className="bg-gradient-to-r from-white via-emerald-100 to-teal-300 bg-clip-text text-2xl font-black text-transparent">
+              <p className="bg-gradient-to-r from-white via-emerald-100 to-teal-300 bg-clip-text text-xl font-black text-transparent lg:text-2xl">
                 MediTrack
               </p>
-            <p className="mt-1 text-sm text-slate-400">Medication dashboard</p>
+              <p className="text-xs text-slate-400 sm:text-sm lg:mt-1">Medication dashboard</p>
             </div>
           </div>
 
-          <nav className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-1">
+          <nav className="mt-3 grid grid-cols-4 gap-2 sm:mt-4 lg:mt-8 lg:grid-cols-1 lg:gap-3">
             {navItems.map((item) => {
               const isActive =
                 pathname === item.path || pathname.startsWith(`${item.path}/`)
@@ -63,7 +63,7 @@ function AppShell({ children }) {
                   key={item.path}
                   to={item.path}
                   aria-current={isActive ? "page" : undefined}
-                  className={`group flex items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm font-medium transition duration-300 hover:-translate-y-0.5 hover:border-emerald-300/35 hover:bg-emerald-400/10 hover:shadow-lg hover:shadow-slate-950/20 ${
+                  className={`group flex min-h-11 items-center justify-center gap-2 rounded-xl border px-2 py-2 text-left text-xs font-medium transition duration-300 hover:-translate-y-0.5 hover:border-emerald-300/35 hover:bg-emerald-400/10 hover:shadow-lg hover:shadow-slate-950/20 sm:text-sm lg:justify-start lg:gap-3 lg:px-4 lg:py-3 ${
                     isActive
                       ? "border-emerald-300/40 bg-emerald-400/15 text-white shadow-lg shadow-emerald-500/20 ring-1 ring-emerald-300/25"
                       : "border-white/10 bg-white/[0.03] text-slate-300"
@@ -71,7 +71,7 @@ function AppShell({ children }) {
                 >
                   <svg
                     viewBox="0 0 24 24"
-                    className={`h-5 w-5 fill-none stroke-current stroke-2 transition duration-300 group-hover:scale-110 ${
+                    className={`h-4 w-4 fill-none stroke-current stroke-2 transition duration-300 group-hover:scale-110 sm:h-5 sm:w-5 ${
                       isActive ? "text-emerald-100" : "text-teal-300/75"
                     }`}
                   >

@@ -6,8 +6,11 @@ import Medicines from "./pages/medicines"
 import Reports from "./pages/Reports"
 import Settings from "./pages/Settings"
 import AppShell from "./components/AppShell"
+import { useMedicationReminders } from "./hooks/useMedicationReminders"
 
 function App() {
+  useMedicationReminders()
+
   return (
     <BrowserRouter>
 

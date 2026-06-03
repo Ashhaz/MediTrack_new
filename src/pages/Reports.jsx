@@ -23,6 +23,7 @@ import { calculateWeeklyAdherence } from "../utils/adherenceUtils.js";
 import { getTodayKey, isMedicineScheduledOnDate, getMinutesNow, parseReminderTime } from "../utils/medicineUtils.js";
 
 const STORAGE_KEY = 'meditrack.medicines';
+const CLEAR_KEY = 'meditrack.historyCleared';
 
 const Reports = () => {
   const [medicineList, setMedicineList] = useState([]);
@@ -69,6 +70,7 @@ const Reports = () => {
     let missedCount = 0;
     let lowestRunway = Infinity;
     const minutesNow = getMinutesNow();
+    const historyCleared = Number(localStorage.getItem(CLEAR_KEY) || 0);
 
     const medPerformance = activeMedicines.map(med => {
       let medTaken = 0;
@@ -78,12 +80,17 @@ const Reports = () => {
       for (let i = 0; i < 7; i++) {
         const date = new Date();
         date.setDate(date.getDate() - i);
-        const dateKey = date.toISOString().slice(0, 10);
+        const dateKey = getTodayKey(date);
 
         if (isMedicineScheduledOnDate(med, date)) {
           const schedule = med.scheduleTimes || [];
-          medScheduled += schedule.length;
           schedule.forEach(time => {
+            const doseDateTime = new Date(`${dateKey}T${time}`).getTime();
+            // Ignore doses scheduled before history reset
+            if (doseDateTime < historyCleared) return;
+
+            medScheduled++;
+
             const reminderMinutes = parseReminderTime(time);
             const isPast = i > 0 || (i === 0 && minutesNow > (reminderMinutes || 0) + 120);
             
@@ -105,7 +112,7 @@ const Reports = () => {
       return {
         id: med.id,
         name: med.name,
-        percentage: medScheduled > 0 ? Math.round((medTaken / medScheduled) * 100) : 100,
+        percentage: medScheduled > 0 ? Math.round((medTaken / medScheduled) * 100) : null,
         entriesCount: medScheduled,
         missedCount: medMissed,
         stockInfo
@@ -120,54 +127,43 @@ const Reports = () => {
     const hasActiveMeds = activeMedicines.length > 0;
     const hasWindowData = medsWithData.length > 0;
 
-    let mostConsistent = { name: "No Data", sub: "Insufficient data" };
-    let needsAttention = { name: "No Data", sub: "Insufficient data" };
+    let mostConsistent = { name: "No Data", sub: "" };
+    let needsAttention = { name: "No Data", sub: "" };
     let insightMessage = "Add medications to generate insights.";
 
     if (!hasActiveMeds) {
-      // Case C: No medicines exist
       mostConsistent = { name: "No Data", sub: "" };
       needsAttention = { name: "No Data", sub: "" };
       insightMessage = "Add medications to generate insights.";
     } else if (!hasWindowData) {
-      mostConsistent = { name: "Insufficient Data", sub: "" };
-      needsAttention = { name: "Insufficient Data", sub: "" };
+      mostConsistent = { name: "No Data", sub: "" };
+      needsAttention = { name: "No Data", sub: "" };
       insightMessage = "No doses scheduled in the last 7 days.";
     } else {
-      const allPerfect = medsWithData.every(m => m.percentage === 100);
-      const allZero = medsWithData.every(m => m.percentage === 0);
+      // Most Consistent: Highest adherence percentage
+      const sorted = [...medsWithData].sort((a, b) => b.percentage - a.percentage);
+      const best = sorted[0];
+      mostConsistent = { name: best.name, sub: `${best.percentage}% Adherence` };
 
-      if (allPerfect) {
-        // Case A: All medications are performing perfectly
-        mostConsistent = { name: medsWithData[0].name, sub: "100% Adherence" };
-        needsAttention = { name: "None", sub: "No issues detected" };
-        insightMessage = "All medications are performing well.";
-      } else if (allZero) {
-        // Case B: No doses recorded successfully
-        mostConsistent = { name: "Insufficient Data", sub: "No records yet" };
-        needsAttention = { name: "All medications", sub: "0% Adherence" };
-        insightMessage = "No successful doses have been recorded.";
+      // Needs Attention: Lowest adherence if below 80%
+      const underperforming = medsWithData
+        .filter(m => m.percentage < 80)
+        .sort((a, b) => a.percentage - b.percentage);
+
+      if (underperforming.length > 0) {
+        const worst = underperforming[0];
+        needsAttention = { name: worst.name, sub: `${worst.percentage}% Adherence` };
+        insightMessage = `${worst.name} requires extra attention.`;
       } else {
-        const sorted = [...medsWithData].sort((a, b) => b.percentage - a.percentage);
-        const best = sorted[0];
-        const worst = sorted[sorted.length - 1];
-
-        mostConsistent = { name: best.name, sub: `${best.percentage}% Adherence` };
-
-        if (best.percentage === worst.percentage) {
-          needsAttention = { name: "None", sub: "All meds performing equally" };
-          insightMessage = "All medications are showing consistent adherence.";
-        } else {
-          needsAttention = { name: worst.name, sub: `${worst.percentage}% Adherence` };
-          insightMessage = `${worst.name} requires extra attention.`;
-        }
+        needsAttention = { name: "None", sub: "All meds above 80%" };
+        insightMessage = "All medications are showing consistent adherence.";
       }
     }
 
     // Streak Logic (reusing logic from Dashboard for consistency)
     let streak = 0;
     for (let i = 0; i < 30; i++) {
-      const date = new Date(new Date().setDate(new Date().getDate() - i)).toISOString().slice(0, 10);
+      const date = getTodayKey(new Date(new Date().setDate(new Date().getDate() - i)));
       const dayMeds = activeMedicines.filter(m => m.startDate <= date && (!m.endDate || m.endDate >= date));
       if (dayMeds.length === 0) continue;
       const perfect = dayMeds.every(m => {
@@ -188,32 +184,9 @@ const Reports = () => {
       medPerformance,
       totalTaken: totalDosesTaken,
       totalMissed: missedCount,
-      totalRecorded: totalDosesTaken + missedCount
+      totalRecorded: totalDosesTaken + missedCount,
+      activeCount: activeMedicines.length
     };
-  }, [medicineList]);
-
-  // Consistency Heatmap Calculation (By time of day)
-  const timeMap = useMemo(() => {
-    const slots = { Morning: 0, Afternoon: 0, Evening: 0, Night: 0 };
-    const totals = { Morning: 0, Afternoon: 0, Evening: 0, Night: 0 };
-
-    medicineList.forEach(m => {
-      (m.adherenceHistory || []).forEach(h => {
-        const hour = parseInt(h.time.split(':')[0]);
-        let slot = "Night";
-        if (hour >= 5 && hour < 12) slot = "Morning";
-        else if (hour >= 12 && hour < 17) slot = "Afternoon";
-        else if (hour >= 17 && hour < 21) slot = "Evening";
-        
-        totals[slot]++;
-        if (h.status === 'Taken') slots[slot]++;
-      });
-    });
-
-    return Object.keys(slots).map(label => ({
-      label,
-      percentage: totals[label] > 0 ? Math.round((slots[label] / totals[label]) * 100) : 100
-    }));
   }, [medicineList]);
 
   // Collect all adherence history entries for recent activity
@@ -225,7 +198,7 @@ const Reports = () => {
       for (let i = 0; i < 7; i++) {
         const date = new Date();
         date.setDate(date.getDate() - i);
-        const dateKey = date.toISOString().slice(0, 10);
+        const dateKey = getTodayKey(date);
 
         if (isMedicineScheduledOnDate(med, date)) {
           (med.scheduleTimes || []).forEach(time => {
@@ -271,7 +244,7 @@ const Reports = () => {
     const adherenceData = Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
       d.setDate(today.getDate() - (6 - i));
-      const dateKey = d.toISOString().slice(0, 10);
+      const dateKey = getTodayKey(d);
 
       let totalDosesForDay = 0;
       let takenDosesForDay = 0;
@@ -283,7 +256,7 @@ const Reports = () => {
         }
       });
 
-      const percentage = totalDosesForDay > 0 ? Math.round((takenDosesForDay / totalDosesForDay) * 100) : 100; // 100% if no doses scheduled
+      const percentage = totalDosesForDay > 0 ? Math.round((takenDosesForDay / totalDosesForDay) * 100) : null;
       return { day: i === 6 ? 'Today' : days[d.getDay()], percentage };
     });
     return adherenceData;
@@ -530,16 +503,24 @@ Medication Management Dashboard
                     <div className="relative w-full flex justify-center items-end h-[156px] mt-1">
                       {/* Percentage Tooltip */}
                       <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-zinc-800 text-white text-[10px] font-bold py-1.5 px-2.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 border border-zinc-700 pointer-events-none shadow-2xl">
-                        {item.percentage}% Adherence
+                        {item.percentage === null ? "No Doses Scheduled" : `${item.percentage}% Adherence`}
                       </div>
                       {/* Bar Track */}
                       <div className="w-full max-w-[28px] bg-zinc-800/20 h-full rounded-t-lg absolute"></div>
                       {/* Active Bar */}
                       <div 
-                        className="w-full max-w-[28px] bg-gradient-to-t from-emerald-600/40 to-emerald-500 group-hover:to-emerald-400 transition-all duration-700 rounded-t-lg relative shadow-[0_0_15px_rgba(16,185,129,0.1)]"
-                        style={{ height: `${item.percentage}%` }}
+                        className={`w-full max-w-[28px] transition-all duration-700 rounded-t-lg relative shadow-lg ${
+                          item.percentage === null 
+                            ? 'bg-zinc-800/50' 
+                            : item.percentage === 0 
+                              ? 'bg-rose-500/40' 
+                              : 'bg-gradient-to-t from-emerald-600/40 to-emerald-500 group-hover:to-emerald-400'
+                        } ${item.percentage !== null && item.percentage > 0 ? 'shadow-[0_0_15px_rgba(16,185,129,0.1)]' : ''}`}
+                        style={{ height: item.percentage === null ? '0%' : `${Math.max(item.percentage, item.percentage === 0 ? 4 : 0)}%` }}
                       >
-                        <div className="absolute top-0 left-0 w-full h-1 bg-emerald-300 rounded-full opacity-50"></div>
+                        {item.percentage !== null && item.percentage > 0 && (
+                          <div className="absolute top-0 left-0 w-full h-1 bg-emerald-300 rounded-full opacity-50"></div>
+                        )}
                       </div>
                     </div>
                     <div className="flex-1 flex items-center justify-center">
@@ -573,7 +554,7 @@ Medication Management Dashboard
                         </div>
                       </td>
                       <td className="py-4 text-sm font-medium text-zinc-300">
-                        {med.percentage}%
+                        {med.percentage !== null ? `${med.percentage}%` : "No Data"}
                       </td>
                       <td className="py-4 text-right">
                         <span className={`text-xs font-bold ${med.stockInfo.color === 'rose-400' ? 'text-rose-400' : 'text-zinc-500'}`}>
@@ -659,8 +640,10 @@ Medication Management Dashboard
                   />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-black text-white">{stats.totalRecorded}</span>
-                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Total</span>
+                  <span className="text-3xl font-black text-white">
+                    {stats.totalRecorded > 0 ? Math.round((stats.totalTaken / stats.totalRecorded) * 100) : 0}%
+                  </span>
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Adherence</span>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4 w-full border-t border-zinc-800/50 pt-4">
@@ -676,24 +659,28 @@ Medication Management Dashboard
             </div>
           </div>
 
-          {/* Consistency Heatmap */}
+          {/* Report Summary Card */}
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 backdrop-blur-sm">
-            <h3 className="font-semibold text-lg mb-6">Timing Consistency</h3>
-            <div className="space-y-5">
-              {timeMap.map(slot => (
-                <div key={slot.label} className="space-y-2">
-                  <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
-                    <span className="text-zinc-500">{slot.label}</span>
-                    <span className="text-emerald-400">{slot.percentage}%</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-emerald-500/80 transition-all duration-1000"
-                      style={{ width: `${slot.percentage}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+            <h3 className="font-semibold text-lg mb-6 flex items-center gap-2">
+              <FileText size={18} className="text-emerald-500" /> Report Summary
+            </h3>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
+                <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Current Streak</span>
+                <span className="text-sm font-black text-white">{stats.streak} Days</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
+                <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Overall Adherence</span>
+                <span className="text-sm font-black text-white">{stats.adherence !== null ? `${stats.adherence}%` : "0%"}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-zinc-800/50">
+                <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Total Doses</span>
+                <span className="text-sm font-black text-white">{stats.totalRecorded}</span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Active Meds</span>
+                <span className="text-sm font-black text-white">{stats.activeCount}</span>
+              </div>
             </div>
           </div>
 

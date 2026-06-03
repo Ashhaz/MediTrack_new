@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { HashRouter, Routes, Route } from "react-router-dom"
 
 import Home from "./pages/Home"
 import Dashboard from "./pages/Dashboard"
@@ -12,8 +12,7 @@ function App() {
   useMedicationReminders()
 
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
-
+    <HashRouter>
       <Routes>
 
         <Route path="/" element={<Home />} />
@@ -54,7 +53,7 @@ function App() {
           }
         />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
   

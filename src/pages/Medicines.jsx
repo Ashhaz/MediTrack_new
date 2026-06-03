@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { Link } from "react-router-dom"
 import MedicineName from "../components/MedicineName.jsx"
 import { getStockStatus } from "../utils/stockUtils.js"
 import { 
@@ -606,12 +607,12 @@ function Medicines() {
                       : "Try a different search term or adjust your status filter."}
                   </p>
                   {stats.total === 0 && (
-                    <a
-                      href="/dashboard"
+                    <Link
+                      to="/dashboard"
                       className="mt-5 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-950/30 transition hover:-translate-y-0.5 hover:bg-emerald-500"
                     >
                       + Add medicine
-                    </a>
+                    </Link>
                   )}
                 </div>
               )}

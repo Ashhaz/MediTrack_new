@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   TrendingUp, 
   CheckCircle2, 
@@ -384,9 +385,9 @@ Medication Management Dashboard
           </div>
           <h2 className="text-2xl font-bold mb-2">No Tracking Data Found</h2>
           <p className="text-zinc-500 max-w-sm mb-6">Add medicines and mark them as taken on your dashboard to see your health analytics here.</p>
-          <a href="/dashboard" className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold transition-colors">
+          <Link to="/dashboard" className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold transition-colors">
             Go to Dashboard
-          </a>
+          </Link>
         </div>
       ) : (
         <div className="p-1">

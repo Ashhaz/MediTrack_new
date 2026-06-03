@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom"
 
 import Home from "./pages/Home"
 import Dashboard from "./pages/Dashboard"
-import Medicines from "./pages/medicines"
+import Medicines from "./pages/Medicines"
 import Reports from "./pages/Reports"
 import Settings from "./pages/Settings"
 import AppShell from "./components/AppShell"
@@ -12,7 +12,7 @@ function App() {
   useMedicationReminders()
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL}>
 
       <Routes>
 
@@ -53,11 +53,9 @@ function App() {
             </AppShell>
           }
         />
-
       </Routes>
-
     </BrowserRouter>
   )
 }
-
+  
 export default App

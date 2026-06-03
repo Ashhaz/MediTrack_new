@@ -2,7 +2,7 @@ import React from "react"
 
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 const frequencyOptions = ["Daily", "Weekly", "Custom Days"]
-const dosageFrequencyOptions = ["Once Daily", "Twice Daily", "Three Times Daily"]
+const dosageFrequencyOptions = ["Once Daily", "Twice Daily", "Three Times Daily", "Four Times Daily"]
 const typeOptions = ["Tablet", "Capsule", "Syrup", "Injection"]
 const mealOptions = ["Before Food", "After Food", "With Food", "Empty Stomach"]
 
@@ -13,10 +13,6 @@ const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"))
 function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
   const isEdit = !!form.id
   const doseCount = Number(form.dosesPerDay) || 1
-  const doseLabels = 
-    doseCount === 3 ? ["Morning", "Afternoon", "Night"] :
-    doseCount === 2 ? ["Morning Dose", "Evening Dose"] :
-    ["Morning Dose"];
 
   const stockVal = Number(form.stock) || 0;
   const isValidCalc = stockVal > 0 && doseCount > 0;
@@ -53,7 +49,7 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
   }
 
   const handleDoseFrequencyChange = (val) => {
-    const count = val === "Three Times Daily" ? 3 : val === "Twice Daily" ? 2 : 1
+    const count = val === "Four Times Daily" ? 4 : val === "Three Times Daily" ? 3 : val === "Twice Daily" ? 2 : 1
     onChange("dosesPerDay", count)
     const newTimes = [...currentTimes]
     while(newTimes.length < count) newTimes.push("08:00")
@@ -165,7 +161,7 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
           <label className="grid gap-1.5 text-sm font-semibold text-slate-200">
             Doses Per Day
             <select
-              value={doseCount === 3 ? "Three Times Daily" : doseCount === 2 ? "Twice Daily" : "Once Daily"}
+              value={doseCount === 4 ? "Four Times Daily" : doseCount === 3 ? "Three Times Daily" : doseCount === 2 ? "Twice Daily" : "Once Daily"}
               onChange={(e) => handleDoseFrequencyChange(e.target.value)}
               className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 font-medium text-white outline-none transition focus:border-emerald-300/40"
             >
@@ -181,7 +177,7 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
               return (
                 <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_260px] gap-4 items-center min-w-0 overflow-hidden">
                   {/* truncate ensures that long labels don't stretch the 1fr column */}
-                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-200/70 min-w-0 truncate">{doseLabels[i]}</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-200/70 min-w-0 truncate">Dose {i + 1}</p>
                   {/* Locked width container for time selects */}
                   <div className="grid grid-cols-3 gap-2 min-w-0 shrink-0">
                     <select value={dH} onChange={(e) => handleTimeChangeAt(i, "hour", e.target.value)} className="w-full rounded-lg bg-black/30 p-2 text-sm text-white outline-none focus:ring-1 focus:ring-emerald-500/50">

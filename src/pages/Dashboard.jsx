@@ -30,6 +30,7 @@ import CalendarModal from "../components/CalendarModal"
 import MedicineCard from "../components/MedicineCard"
 import NotificationCenter from "../components/NotificationCenter.jsx"
 import { medicines } from "../data/medicines"
+import { readJsonFromStorage } from "../utils/storageUtils.js"
 
 const STORAGE_KEY = "meditrack.medicines"
 const CLEAR_KEY = "meditrack.historyCleared"
@@ -163,18 +164,13 @@ const normalizeInitialStatus = (medicine) => ({
 })
 
 const getInitialMedicines = () => {
-  const savedMedicines = localStorage.getItem(STORAGE_KEY)
+  const parsedMedicines = readJsonFromStorage(STORAGE_KEY, [])
+  const validMeds = Array.isArray(parsedMedicines) ? parsedMedicines : []
 
-  try {
-    const parsedMedicines = savedMedicines ? JSON.parse(savedMedicines) : []
-    const validMeds = Array.isArray(parsedMedicines) ? parsedMedicines : []
-    return validMeds
-      .map(normalizeMedicine)
-      .filter(Boolean)
-      .map(normalizeInitialStatus)
-  } catch {
-    return []
-  }
+  return validMeds
+    .map(normalizeMedicine)
+    .filter(Boolean)
+    .map(normalizeInitialStatus)
 }
 
 const medicineListsMatch = (firstList, secondList) =>

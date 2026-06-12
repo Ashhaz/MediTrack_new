@@ -22,26 +22,26 @@ import MedicineName from "../components/MedicineName"
 import { getStockStatus } from "../utils/stockUtils.js";
 import { calculateWeeklyAdherence } from "../utils/adherenceUtils.js";
 import { getTodayKey, isMedicineScheduledOnDate, getMinutesNow, parseReminderTime } from "../utils/medicineUtils.js";
+import { readJsonFromStorage } from "../utils/storageUtils.js";
 
 const STORAGE_KEY = 'meditrack.medicines';
 const CLEAR_KEY = 'meditrack.historyCleared';
+
+const readMedicines = () => {
+  const medicines = readJsonFromStorage(STORAGE_KEY, []);
+  return Array.isArray(medicines) ? medicines : [];
+};
 
 const Reports = () => {
   const [medicineList, setMedicineList] = useState([]);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
 
   useEffect(() => {
-    const savedData = localStorage.getItem(STORAGE_KEY);
-    if (savedData) {
-      setMedicineList(JSON.parse(savedData));
-    }
+    setMedicineList(readMedicines());
 
     // Listen for custom event to re-fetch data when localStorage changes
     const handleStorageChange = () => {
-      const updatedData = localStorage.getItem(STORAGE_KEY);
-      if (updatedData) {
-        setMedicineList(JSON.parse(updatedData));
-      }
+      setMedicineList(readMedicines());
     };
 
     window.addEventListener('meditrack-data-updated', handleStorageChange);

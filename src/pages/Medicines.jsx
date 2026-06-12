@@ -12,6 +12,7 @@ import {
 } from "../utils/medicineUtils.js"
 
 import { medicines } from "../data/medicines.js"
+import { readJsonFromStorage } from "../utils/storageUtils.js"
 
 const STORAGE_KEY = "meditrack.medicines"
 const REMINDER_WINDOW_MINUTES = 30
@@ -197,23 +198,14 @@ const getHistorySummary = (medicine) => {
 }
 
 const getInitialMedicines = () => {
-  const savedMedicines = localStorage.getItem(STORAGE_KEY)
   const minutesNow = getMinutesNow()
+  const parsedMedicines = readJsonFromStorage(STORAGE_KEY, [])
 
-  if (!savedMedicines) {
-    return []
-  }
-
-  try {
-    const parsedMedicines = JSON.parse(savedMedicines)
-    return Array.isArray(parsedMedicines)
-      ? parsedMedicines
-          .map((medicine) => normalizeMedicine(medicine, minutesNow))
-          .filter(Boolean)
-      : []
-  } catch {
-    return []
-  }
+  return Array.isArray(parsedMedicines)
+    ? parsedMedicines
+        .map((medicine) => normalizeMedicine(medicine, minutesNow))
+        .filter(Boolean)
+    : []
 }
 
 const medicineListsMatch = (firstList, secondList) =>

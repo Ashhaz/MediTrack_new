@@ -8,6 +8,7 @@ import {
   getMinutesNow, 
   formatTimeForStorage, 
   formatTimeForDisplay,
+  isDoseAfterMedicineCreation,
   isMedicineScheduledOnDate 
 } from "../utils/medicineUtils.js"
 
@@ -73,10 +74,15 @@ const formatDuration = (minutes) => {
 
 const getDoseStatus = (medicine, time, minutesNow = getMinutesNow(), lastReset = 0) => {
   const todayKey = getTodayKey()
-  const isTakenToday = (medicine?.adherenceHistory || []).some(
-    h => h.date === todayKey && h.time === time && h.status === "Taken"
+  const isAfterCreation = isDoseAfterMedicineCreation(medicine, todayKey, time)
+  const historyEntry = (medicine?.adherenceHistory || []).find(
+    h => h.date === todayKey && h.time === time
   )
-  if (isTakenToday) return "Taken"
+  if (historyEntry) {
+    return historyEntry.status === "Missed" && !isAfterCreation
+      ? "Upcoming"
+      : historyEntry.status
+  }
   if (medicine?.status === "Completed Course") return "Completed Course"
 
   const reminderMinutes = parseReminderTime(time)
@@ -87,6 +93,7 @@ const getDoseStatus = (medicine, time, minutesNow = getMinutesNow(), lastReset =
   // Ignore Missed status if scheduled before history reset
   const doseDateTime = new Date(`${todayKey}T${time}`).getTime()
   if (doseDateTime < lastReset) return "Upcoming"
+  if (!isAfterCreation) return "Upcoming"
 
   if (minutesNow >= reminderMinutes && minutesNow <= reminderMinutes + REMINDER_WINDOW_MINUTES) return "Due Now"
   if (minutesNow > reminderMinutes + REMINDER_WINDOW_MINUTES && minutesNow < reminderMinutes + 120) return "Delayed"
@@ -143,6 +150,7 @@ const normalizeMedicine = (medicine, minutesNow = getMinutesNow()) => {
     startDate: medicine.startDate || todayKey,
     stock: Number(medicine.stock ?? 0),
     adherenceHistory: Array.isArray(medicine.adherenceHistory) ? medicine.adherenceHistory : [],
+    createdAt: medicine.createdAt || medicine.id || Date.now(),
     updatedAt: medicine.updatedAt || Date.now()
   }
 }
@@ -283,6 +291,8 @@ function Medicines() {
 
     activeList.forEach(med => {
       med?.scheduleTimes?.forEach(time => {
+        if (!isDoseAfterMedicineCreation(med, getTodayKey(), time)) return;
+
         totalDoses++;
         const status = getDoseStatus(med, time);
         if (status === "Taken") taken++;
@@ -330,8 +340,12 @@ function Medicines() {
       }
 
       if (sortBy === "Most Missed") {
-        const missedA = (firstMedicine?.adherenceHistory || []).filter(h => h.status === 'Missed').length;
-        const missedB = (secondMedicine?.adherenceHistory || []).filter(h => h.status === 'Missed').length;
+        const missedA = (firstMedicine?.adherenceHistory || []).filter(
+          h => h.status === 'Missed' && isDoseAfterMedicineCreation(firstMedicine, h.date, h.time),
+        ).length;
+        const missedB = (secondMedicine?.adherenceHistory || []).filter(
+          h => h.status === 'Missed' && isDoseAfterMedicineCreation(secondMedicine, h.date, h.time),
+        ).length;
         return missedB - missedA;
       }
 

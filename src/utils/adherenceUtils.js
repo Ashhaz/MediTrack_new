@@ -1,4 +1,4 @@
-import { isMedicineScheduledOnDate, getTodayKey } from "./medicineUtils";
+import { isDoseAfterMedicineCreation, isMedicineScheduledOnDate, getTodayKey } from "./medicineUtils";
 
 /**
  * Calculates the adherence percentage for the last 7 days.
@@ -22,11 +22,13 @@ export const calculateWeeklyAdherence = (medicineList) => {
       // Check if the medicine was active and scheduled on this specific date
       if (isMedicineScheduledOnDate(med, date)) {
         const schedule = med.scheduleTimes || [];
-        
-        totalScheduled += schedule.length;
 
         // Check adherence history for each scheduled time slot
         schedule.forEach(time => {
+          if (!isDoseAfterMedicineCreation(med, dateKey, time)) return;
+
+          totalScheduled++;
+
           const isTaken = (med.adherenceHistory || []).some(
             h => h.date === dateKey && h.time === time && h.status === "Taken"
           );

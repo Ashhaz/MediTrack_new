@@ -21,7 +21,13 @@ import {
 import MedicineName from "../components/MedicineName"
 import { getStockStatus } from "../utils/stockUtils.js";
 import { calculateWeeklyAdherence } from "../utils/adherenceUtils.js";
-import { getTodayKey, isMedicineScheduledOnDate, getMinutesNow, parseReminderTime } from "../utils/medicineUtils.js";
+import {
+  getTodayKey,
+  isDoseAfterMedicineCreation,
+  isMedicineScheduledOnDate,
+  getMinutesNow,
+  parseReminderTime,
+} from "../utils/medicineUtils.js";
 import { readJsonFromStorage } from "../utils/storageUtils.js";
 
 const STORAGE_KEY = 'meditrack.medicines';
@@ -89,6 +95,7 @@ const Reports = () => {
             const doseDateTime = new Date(`${dateKey}T${time}`).getTime();
             // Ignore doses scheduled before history reset
             if (doseDateTime < historyCleared) return;
+            if (!isDoseAfterMedicineCreation(med, dateKey, time)) return;
 
             medScheduled++;
 
@@ -206,8 +213,11 @@ const Reports = () => {
             const reminderMinutes = parseReminderTime(time);
             const isPast = i > 0 || (i === 0 && minutesNow > (reminderMinutes || 0) + 120);
             const historyEntry = (med.adherenceHistory || []).find(h => h.date === dateKey && h.time === time);
+            const isAfterCreation = isDoseAfterMedicineCreation(med, dateKey, time);
+            const isInvalidPreCreationMissed =
+              historyEntry?.status === "Missed" && !isAfterCreation;
 
-            if (historyEntry) {
+            if (historyEntry && !isInvalidPreCreationMissed) {
               activities.push({
                 id: `${med.id}-${dateKey}-${time}`,
                 name: med.name,
@@ -217,7 +227,7 @@ const Reports = () => {
                 date: dateKey,
                 timestamp: new Date(`${dateKey}T${time}`).getTime()
               });
-            } else if (isPast) {
+            } else if (isPast && isAfterCreation) {
               activities.push({
                 id: `${med.id}-${dateKey}-${time}`,
                 name: med.name,
@@ -252,8 +262,16 @@ const Reports = () => {
 
       medicineList.forEach(med => {
         if (isMedicineScheduledOnDate(med, d)) {
-          totalDosesForDay += med.scheduleTimes?.length || 1;
-          takenDosesForDay += (med.adherenceHistory || []).filter(h => h.date === dateKey && h.status === 'Taken').length;
+          const schedule = med.scheduleTimes || ["08:00"];
+          schedule.forEach((time) => {
+            if (!isDoseAfterMedicineCreation(med, dateKey, time)) return;
+
+            totalDosesForDay++;
+            const wasTaken = (med.adherenceHistory || []).some(
+              h => h.date === dateKey && h.time === time && h.status === 'Taken',
+            );
+            if (wasTaken) takenDosesForDay++;
+          });
         }
       });
 

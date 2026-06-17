@@ -3,6 +3,7 @@ import {
   formatTimeForDisplay,
   getMinutesNow,
   getTodayKey,
+  isDoseAfterMedicineCreation,
   isMedicineScheduledOnDate,
   parseReminderTime,
 } from "../utils/medicineUtils.js"
@@ -20,11 +21,16 @@ const CHECK_INTERVAL_MS = 30000
 
 const getDoseStatus = (medicine, time, minutesNow, targetDate, lastReset) => {
   const dateKey = getTodayKey(targetDate)
+  const isAfterCreation = isDoseAfterMedicineCreation(medicine, dateKey, time)
   const existingEntry = (medicine.adherenceHistory || []).find(
     (entry) => entry.date === dateKey && entry.time === time,
   )
 
-  if (existingEntry) return existingEntry.status
+  if (existingEntry) {
+    return existingEntry.status === "Missed" && !isAfterCreation
+      ? "Upcoming"
+      : existingEntry.status
+  }
   if (medicine.status === "Completed Course") return "Completed Course"
 
   const reminderMinutes = parseReminderTime(time)
@@ -32,6 +38,7 @@ const getDoseStatus = (medicine, time, minutesNow, targetDate, lastReset) => {
 
   const doseDateTime = new Date(`${dateKey}T${time}`).getTime()
   if (doseDateTime < lastReset) return "Upcoming"
+  if (!isAfterCreation) return "Upcoming"
 
   if (
     minutesNow >= reminderMinutes &&
@@ -256,6 +263,17 @@ const checkMedicationReminders = async () => {
           continue
         }
 
+        if (!isDoseAfterMedicineCreation(medicine, todayKey, time)) {
+          console.log("[MediTrack Reminders] Dose skipped because it was scheduled before medicine creation", {
+            medicineId: medicine?.id,
+            medicineName: medicine?.name,
+            time,
+            doseDateTime,
+            createdAt: medicine?.createdAt,
+          })
+          continue
+        }
+
         const doseStatus = getDoseStatus(
           medCopy,
           time,
@@ -325,7 +343,11 @@ const checkMedicationReminders = async () => {
           (entry) => entry.date === todayKey && entry.time === time,
         )
 
-        if (doseStatus === "Missed" && !alreadyRecorded) {
+        if (
+          doseStatus === "Missed" &&
+          !alreadyRecorded &&
+          isDoseAfterMedicineCreation(medCopy, todayKey, time)
+        ) {
           medCopy = {
             ...medCopy,
             adherenceHistory: [

@@ -68,6 +68,24 @@ export const formatTimeForDisplay = (time) => {
   return `${displayHours}:${String(minutes).padStart(2, "0")} ${period}`
 }
 
+export const isDoseAfterMedicineCreation = (medicine, dateKey, time) => {
+  if (medicine?.createdAt === undefined || medicine?.createdAt === null || medicine?.createdAt === "") {
+    return true
+  }
+
+  const createdAtValue =
+    typeof medicine.createdAt === "string" && /^\d+$/.test(medicine.createdAt)
+      ? Number(medicine.createdAt)
+      : medicine.createdAt
+  const createdAt = new Date(createdAtValue).getTime()
+  if (Number.isNaN(createdAt)) return true
+
+  const doseDateTime = new Date(`${dateKey}T${time}`).getTime()
+  if (Number.isNaN(doseDateTime)) return true
+
+  return doseDateTime >= createdAt
+}
+
 export const isMedicineScheduledOnDate = (medicine, date) => {
   const dateKey = getTodayKey(date);
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" });

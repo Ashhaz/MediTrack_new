@@ -16,6 +16,7 @@ import {
 import { 
   getTodayKey, 
   parseReminderTime,
+  isDoseAfterMedicineCreation,
   isMedicineScheduledOnDate, 
   getMinutesNow, 
   formatTimeForStorage, 
@@ -131,12 +132,16 @@ const normalizeMedicine = (medicine) => {
 
 const getDoseStatus = (medicine, time, minutesNow = getMinutesNow(), targetDate = new Date(), lastReset = 0) => {
   const dateKey = getTodayKey(targetDate)
+  const isAfterCreation = isDoseAfterMedicineCreation(medicine, dateKey, time)
   const entry = (medicine.adherenceHistory || []).find(h => h.date === dateKey && h.time === time)
-  if (entry) return entry.status
+  if (entry) {
+    return entry.status === "Missed" && !isAfterCreation ? "Upcoming" : entry.status
+  }
   
   // If the dose was scheduled before the history was cleared, treat it as Upcoming (not Missed)
   const doseDateTime = new Date(`${dateKey}T${time}`).getTime()
   if (doseDateTime < lastReset) return "Upcoming"
+  if (!isAfterCreation) return "Upcoming"
 
   if (medicine.status === "Completed Course") return "Completed Course"
 
@@ -412,8 +417,13 @@ function Dashboard() {
         const doseDateTime = new Date(`${todayKey}T${t}`).getTime()
         // Only count as a "Scheduled Dose" for stats if it happened after the reset
         const isAfterReset = doseDateTime >= historyCleared
+        const isAfterCreation = isDoseAfterMedicineCreation(med, todayKey, t)
 
-        if (isMedicineScheduledOnDate(med, new Date()) && isAfterReset) total++
+        if (!isMedicineScheduledOnDate(med, new Date()) || !isAfterReset || !isAfterCreation) {
+          return
+        }
+
+        total++
         
         const s = getDoseStatus(med, t, getMinutesNow(), new Date(), historyCleared)
         if (s === "Taken") completed++
@@ -507,16 +517,18 @@ function Dashboard() {
   }
 
   const addMedicine = () => {
+    const now = Date.now()
+
     setMedicineList((current) => [
       ...current,
       {
-        id: Date.now(),
+        id: now,
         name: form.name,
         dosage: form.dosage,
         scheduleTimes: form.scheduleTimes.map(formatTimeForStorage),
         instructions: form.instructions,
-        status: form.status,
-        previousStatus: form.status,
+        status: "Upcoming",
+        previousStatus: "Upcoming",
         dosesPerDay: form.dosesPerDay || 1,
         frequencyType: form.frequencyType || "Daily",
         medicineType: form.medicineType || "Tablet",
@@ -527,9 +539,10 @@ function Dashboard() {
         startDate: form.startDate || getTodayKey(), // Use centralized utility
         endDate: form.endDate,
         notificationSentFor: null,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
         missedFor: null,
+        adherenceHistory: [],
       },
     ])
   }
@@ -544,7 +557,11 @@ function Dashboard() {
         const todayKey = getTodayKey()
         const doseToMark = medicine.scheduleTimes.find(t => {
           const status = getDoseStatus(medicine, t)
-          return status !== "Taken" && status !== "Missed"
+          return (
+            status !== "Taken" &&
+            status !== "Missed" &&
+            isDoseAfterMedicineCreation(medicine, todayKey, t)
+          )
         })
 
         if (!doseToMark) {

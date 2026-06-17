@@ -19,21 +19,6 @@ import {
   FileSpreadsheet,
   Clock
 } from 'lucide-react';
-import {
-  formatTimeForDisplay,
-  getMinutesNow,
-  getTodayKey,
-  isMedicineScheduledOnDate,
-  parseReminderTime,
-} from "../utils/medicineUtils.js";
-import {
-  addNotification,
-  NOTIFICATIONS_UPDATED_EVENT,
-} from "../utils/notificationUtils.js";
-import {
-  requestNotificationPermission,
-  showServiceWorkerNotification,
-} from "../utils/serviceWorkerNotifications.js";
 import { readJsonFromStorage, safeParseJson } from "../utils/storageUtils.js";
 
 // Standardized Storage Keys
@@ -59,111 +44,9 @@ const defaultProfile = {
   email: "ashhaz.ahmed@example.com",
 };
 
-const DEBUG_REMINDER_WINDOW_MINUTES = 30;
-
 const readMedicines = () => {
   const medicines = readJsonFromStorage(STORAGE_KEYS.MEDICINES, []);
   return Array.isArray(medicines) ? medicines : [];
-};
-
-const getDebugDoseStatus = (medicine, time, minutesNow, targetDate, lastReset) => {
-  const dateKey = getTodayKey(targetDate);
-  const existingEntry = (medicine.adherenceHistory || []).find(
-    (entry) => entry.date === dateKey && entry.time === time,
-  );
-
-  if (existingEntry) return existingEntry.status;
-  if (medicine.status === "Completed Course") return "Completed Course";
-
-  const reminderMinutes = parseReminderTime(time);
-  if (reminderMinutes === null) return "Invalid Time";
-
-  const doseDateTime = new Date(`${dateKey}T${time}`).getTime();
-  if (doseDateTime < lastReset) return "Before Reset";
-
-  if (
-    minutesNow >= reminderMinutes &&
-    minutesNow <= reminderMinutes + DEBUG_REMINDER_WINDOW_MINUTES
-  ) {
-    return "Due Now";
-  }
-
-  if (
-    reminderMinutes - minutesNow <= DEBUG_REMINDER_WINDOW_MINUTES &&
-    reminderMinutes - minutesNow > 0
-  ) {
-    return "Due Soon";
-  }
-
-  if (
-    minutesNow > reminderMinutes + DEBUG_REMINDER_WINDOW_MINUTES &&
-    minutesNow < reminderMinutes + 120
-  ) {
-    return "Delayed";
-  }
-
-  if (minutesNow >= reminderMinutes + 120) return "Missed";
-
-  return "Upcoming";
-};
-
-const getReminderDebugSnapshot = () => {
-  const now = new Date();
-  const minutesNow = getMinutesNow();
-  const historyCleared = Number(localStorage.getItem(STORAGE_KEYS.HISTORY_CLEARED) || 0);
-  const medicines = readMedicines();
-  const notificationsStored = readJsonFromStorage(STORAGE_KEYS.NOTIFICATIONS, []);
-  const notificationCount = Array.isArray(notificationsStored)
-    ? notificationsStored.length
-    : 0;
-  const doseRows = medicines
-    .filter((medicine) => !medicine?.archived && isMedicineScheduledOnDate(medicine, now))
-    .flatMap((medicine) =>
-      (Array.isArray(medicine.scheduleTimes) ? medicine.scheduleTimes : []).map((time) => ({
-        medicine,
-        time,
-        reminderMinutes: parseReminderTime(time),
-        doseStatus: getDebugDoseStatus(
-          medicine,
-          time,
-          minutesNow,
-          now,
-          historyCleared,
-        ),
-      })),
-    );
-
-  const statusRank = {
-    "Due Now": 0,
-    Delayed: 1,
-    "Due Soon": 2,
-    Missed: 3,
-    Upcoming: 4,
-    Taken: 5,
-    "Completed Course": 6,
-    "Invalid Time": 7,
-    "Before Reset": 8,
-  };
-  const selectedDose =
-    [...doseRows].sort((first, second) => {
-      const firstRank = statusRank[first.doseStatus] ?? 99;
-      const secondRank = statusRank[second.doseStatus] ?? 99;
-
-      if (firstRank !== secondRank) return firstRank - secondRank;
-      return (first.reminderMinutes ?? 9999) - (second.reminderMinutes ?? 9999);
-    })[0] || null;
-
-  return {
-    currentTime: now.toLocaleTimeString(),
-    doseStatus: selectedDose?.doseStatus || "No scheduled dose",
-    doseLabel: selectedDose
-      ? `${selectedDose.medicine.name} at ${formatTimeForDisplay(selectedDose.time)}`
-      : "None",
-    notificationPermission:
-      "Notification" in window ? Notification.permission : "unsupported",
-    notificationSentFor: selectedDose?.medicine?.notificationSentFor || "Not set",
-    notificationsStored: notificationCount,
-  };
 };
 
 const Settings = () => {
@@ -195,8 +78,6 @@ const Settings = () => {
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const [profileForm, setProfileForm] = useState({ name: '', email: '' });
   const [emailError, setEmailError] = useState("");
-  const [reminderDebug, setReminderDebug] = useState(getReminderDebugSnapshot);
-  const [testNotificationStatus, setTestNotificationStatus] = useState("");
 
   // Automatically clear toast after a delay
   useEffect(() => {
@@ -216,22 +97,6 @@ const Settings = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showExportDropdown]);
-
-  useEffect(() => {
-    const refreshReminderDebug = () => setReminderDebug(getReminderDebugSnapshot());
-    const timer = window.setInterval(refreshReminderDebug, 1000);
-
-    window.addEventListener("storage", refreshReminderDebug);
-    window.addEventListener("meditrack-data-updated", refreshReminderDebug);
-    window.addEventListener(NOTIFICATIONS_UPDATED_EVENT, refreshReminderDebug);
-
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("storage", refreshReminderDebug);
-      window.removeEventListener("meditrack-data-updated", refreshReminderDebug);
-      window.removeEventListener(NOTIFICATIONS_UPDATED_EVENT, refreshReminderDebug);
-    };
-  }, []);
 
   const openEditModal = () => {
     setProfileForm({ name: profile.name, email: profile.email });
@@ -361,60 +226,6 @@ Generated by MediTrack Settings
     setToast("Settings saved successfully");
   };
 
-  const handleTestNotification = async () => {
-    setTestNotificationStatus("Requesting notification permission...");
-
-    try {
-      const permission = await requestNotificationPermission();
-      console.log("[MediTrack Notifications] Test notification permission result", {
-        permission,
-      });
-
-      if (permission !== "granted") {
-        const message = `Notification permission is ${permission}`;
-        setTestNotificationStatus(message);
-        setToast(message);
-        return;
-      }
-
-      setTestNotificationStatus("Sending test notification...");
-      const result = await showServiceWorkerNotification("MediTrack test notification", {
-        body: "If you can see this, medication reminders can use browser notifications.",
-        tag: `meditrack-test-${Date.now()}`,
-        requireInteraction: false,
-        data: {
-          url: `${import.meta.env.BASE_URL}#/settings`,
-          type: "test",
-        },
-      });
-
-      console.log("[MediTrack Notifications] Test notification result", result);
-
-      if (!result.shown) {
-        const message = `Test failed via ${result.method}: ${result.error?.message || result.error || "unknown error"}`;
-        setTestNotificationStatus(message);
-        setToast("Test notification failed");
-        return;
-      }
-
-      addNotification({
-        title: "MediTrack test notification",
-        message: "Test notification sent successfully.",
-        type: "system",
-      });
-
-      const message = `Test notification sent via ${result.method}`;
-      setTestNotificationStatus(message);
-      setToast("Test notification sent");
-    } catch (error) {
-      console.error("[MediTrack Notifications] Test notification failed", error);
-      setTestNotificationStatus(error?.message || "Test notification failed");
-      setToast("Test notification failed");
-    } finally {
-      setReminderDebug(getReminderDebugSnapshot());
-    }
-  };
-
   return (
     <div className="min-h-screen animate-[fadeUp_0.6s_ease-out]">
       <style>
@@ -516,53 +327,6 @@ Generated by MediTrack Settings
               enabled={notifications.soundNotifications}
               onClick={() => toggleNotification('soundNotifications')}
             />
-            <button
-              type="button"
-              onClick={handleTestNotification}
-              className="flex w-full items-center justify-between gap-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-left text-emerald-100 transition hover:border-emerald-300/40 hover:bg-emerald-500/15"
-            >
-              <div className="flex items-center gap-4">
-                <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-300">
-                  <BellRing size={18} />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-white">Test Notification</p>
-                  <p className="text-[11px] font-medium text-emerald-100/70">
-                    Send an immediate browser notification
-                  </p>
-                </div>
-              </div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-300">
-                Send
-              </span>
-            </button>
-            {testNotificationStatus && (
-              <p className="rounded-2xl border border-white/5 bg-black/25 px-4 py-3 text-xs font-bold text-slate-300">
-                {testNotificationStatus}
-              </p>
-            )}
-          </div>
-        </section>
-
-        {/* TEMPORARY REMINDER DEBUG SECTION */}
-        <section className="rounded-[2.5rem] border border-amber-400/20 bg-amber-400/[0.04] p-8 shadow-2xl shadow-slate-950/20 backdrop-blur-xl transition duration-300 hover:border-amber-300/30">
-          <div className="flex items-center gap-4 mb-8">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-500/10 text-amber-400">
-              <AlertTriangle size={20} />
-            </div>
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-amber-300">Temporary Debug</p>
-              <h2 className="text-xl font-black text-white">Reminder Flow</h2>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <DebugRow label="Current Time" value={reminderDebug.currentTime} />
-            <DebugRow label="Selected Dose" value={reminderDebug.doseLabel} />
-            <DebugRow label="Dose Status" value={reminderDebug.doseStatus} />
-            <DebugRow label="Notification Permission" value={reminderDebug.notificationPermission} />
-            <DebugRow label="notificationSentFor" value={reminderDebug.notificationSentFor} />
-            <DebugRow label="Notifications Stored" value={reminderDebug.notificationsStored} />
           </div>
         </section>
 
@@ -831,13 +595,6 @@ Generated by MediTrack Settings
 };
 
 /* Helper Components */
-
-const DebugRow = ({ label, value }) => (
-  <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/5 bg-black/25 px-4 py-3">
-    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</span>
-    <span className="min-w-0 text-right text-sm font-bold text-white break-words">{String(value)}</span>
-  </div>
-);
 
 const ToggleItem = ({ icon, label, description, enabled, onClick }) => (
   <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-black/25 border border-white/5 transition hover:bg-black/40">

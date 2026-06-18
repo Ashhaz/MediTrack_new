@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react"
 import { getStockStatus } from "../utils/stockUtils.js"
-import { formatTimeForDisplay, getTimeSlotDisplay, normalizeScheduleSlots } from "../utils/medicineUtils.js"
+import { formatTimeWithSlotLabel, getTimeSlotDisplay } from "../utils/medicineUtils.js"
 
 const parseReminderTime = (time) => {
   if (!time || typeof time !== 'string') return null;
@@ -53,12 +53,9 @@ function MedicineCard({
   instructions,
   status,
   medicineType,
-  mealTiming,
   stock,
   startDate,
   endDate,
-  scheduleSlots = [],
-  scheduleTimes = [],
   reminderTimes = [],
   accentIndex = 0,
   onMarkTaken,
@@ -79,10 +76,10 @@ function MedicineCard({
   const reminderMinutes = Number(parseReminderTime(time)) || 0
   const minutesNow = new Date().getHours() * 60 + new Date().getMinutes()
   const isDueSoon = status === 'Upcoming' && (reminderMinutes - minutesNow <= 30) && (reminderMinutes - minutesNow >= 0)
-  const displayScheduleSlots = normalizeScheduleSlots({ scheduleSlots, scheduleTimes: scheduleTimes.length ? scheduleTimes : reminderTimes, timeSlot, time })
+  const displayTime = formatTimeWithSlotLabel(time, timeSlot)
 
   // Safe derived values using props
-  const dosesCount = displayScheduleSlots.length || 1
+  const dosesCount = (reminderTimes?.length) || 1
   const stockVal = Number(stock) || 0
   const isValidCalc = stockVal > 0
   const estimatedDays = isValidCalc ? Math.floor(stockVal / dosesCount) : 0
@@ -134,6 +131,9 @@ function MedicineCard({
               {dosage} {/* Assuming dosage is a string, not an object */}
             </p>
           )}
+          <p className="mt-1 text-xs font-bold text-emerald-300">
+            {getTimeSlotDisplay(timeSlot)}
+          </p>
           <p className="mt-1 text-sm text-slate-400 line-clamp-1">{instructions || "No instructions provided"}</p>
           <div className="mt-2 flex items-center gap-2">
             {(() => {
@@ -185,15 +185,7 @@ function MedicineCard({
         </div>
       </div>
 
-      <div className="mt-3 space-y-1 pb-1">
-        {displayScheduleSlots.map((entry) => (
-          <p key={entry.slot} className="text-sm font-black text-white">
-            <span className="text-emerald-300">{getTimeSlotDisplay(entry.slot)}</span>
-            <span className="text-slate-500"> • </span>
-            <span>{formatTimeForDisplay(entry.time)}</span>
-          </p>
-        ))}
-      </div>
+      <p className="mt-3 pb-1 text-2xl font-black text-white">{displayTime}</p>
 
       <div className="mb-3.5 flex items-center gap-2 border-t border-white/5 pt-3.5">
         <button
@@ -232,7 +224,7 @@ function MedicineCard({
             </p>
             <h4 className="mt-2 text-xl font-black text-white">{name}</h4>
             <p className="mt-3 text-sm leading-6 text-slate-300">
-              Did you take this medicine at {time}?
+              Did you take this medicine at {displayTime}?
             </p>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-3">

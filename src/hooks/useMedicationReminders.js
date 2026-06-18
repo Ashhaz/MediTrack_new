@@ -117,7 +117,9 @@ const notifyDoseDue = async (medicine, time) => {
 
   const displayTime = formatTimeForDisplay(time)
   const title = `Time to take ${medicine.name}`
-  const message = `Scheduled for ${displayTime}${medicine.dosage ? ` (${medicine.dosage})` : ""}${medicine.mealTiming ? ` - ${medicine.mealTiming}` : ""}.`
+  const slot = (medicine.scheduleSlots || []).find(s => s.time === time);
+  const mealTiming = slot?.mealTiming || medicine.mealTiming || "After Food";
+  const message = `Scheduled for ${displayTime}${medicine.dosage ? ` (${medicine.dosage})` : ""}${mealTiming ? ` - ${mealTiming}` : ""}.`
   const notificationResult = await showServiceWorkerNotification(title, {
     body: message,
     tag: `meditrack-${medicine.id}-${getTodayKey()}-${time}`,

@@ -59,7 +59,6 @@ const emptyForm = {
   dosesPerDay: 1,
   frequencyType: "Daily",
   medicineType: "Tablet",
-  mealTiming: "With Food",
   stock: 30,
   duration: "Until Stopped",
   startDate: getTodayKey(),
@@ -344,12 +343,13 @@ function Dashboard() {
       medicineList.filter(m => isMedicineScheduledOnDate(m, new Date())).forEach(med => {
         med.scheduleTimes.forEach(time => {
           const status = getDoseStatus(med, time, getMinutesNow(), new Date(), historyCleared)
+          const slot = (med.scheduleSlots || []).find(s => s.time === time);
           if (status !== "Taken") {
             allDoses.push({
               time,
               name: med.name,
               dosage: med.dosage || "Dose set",
-              mealTiming: med.mealTiming || "With Food",
+              mealTiming: slot?.mealTiming || med.mealTiming || "After Food",
               stock: med.stock || 0,
               status,
               rawTime: parseReminderTime(time)
@@ -568,7 +568,6 @@ function Dashboard() {
         dosesPerDay: scheduleSlots.length,
         frequencyType: form.frequencyType || "Daily",
         medicineType: form.medicineType || "Tablet",
-        mealTiming: form.mealTiming || "With Food",
         stock: form.stock || 0,
         customDays: form.customDays || [],
         duration: form.duration,
@@ -913,7 +912,7 @@ function Dashboard() {
                   <div className="mt-1 min-w-0">
                     <MedicineName name={priorityDose.medicine.name} truncate={true} className="text-2xl font-black text-white" />
                   </div>
-                  <p className="text-sm font-medium text-slate-400">{priorityDose.medicine.dosage} • {priorityDose.medicine.mealTiming}</p>
+                  <p className="text-sm font-medium text-slate-400">{priorityDose.medicine.dosage} • {priorityDose.mealTiming}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">

@@ -169,7 +169,7 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
             </label>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 min-w-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
             <label className="grid gap-1.5 text-sm font-semibold text-slate-200 min-w-0">
               Medicine type
               <select
@@ -178,19 +178,6 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
                 className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 font-medium text-white outline-none transition focus:border-emerald-300/40 focus:bg-emerald-400/10"
               >
                 {typeOptions.map((opt) => (
-                  <option key={opt} value={opt} className="bg-[#071412]">{opt}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-1.5 text-sm font-semibold text-slate-200 min-w-0">
-              Meal timing
-              <select
-                value={form.mealTiming || "With Food"}
-                onChange={(e) => onChange("mealTiming", e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 font-medium text-white outline-none transition focus:border-emerald-300/40 focus:bg-emerald-400/10"
-              >
-                {mealOptions.map((opt) => (
                   <option key={opt} value={opt} className="bg-[#071412]">{opt}</option>
                 ))}
               </select>

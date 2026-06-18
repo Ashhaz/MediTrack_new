@@ -52,7 +52,7 @@ const emptyForm = {
   name: "",
   dosage: "",
   scheduleTimes: ["08:00"],
-  scheduleSlots: [{ slot: "Morning", time: "08:00" }],
+  scheduleSlots: [{ slot: "Morning", time: "08:00", mealTiming: "After Food" }],
   timeSlot: "Morning",
   instructions: "",
   status: "Upcoming",
@@ -119,7 +119,11 @@ const normalizeMedicine = (medicine) => {
   if (!medicine || typeof medicine !== 'object') return null;
   
   // Migration logic
-  const scheduleSlots = normalizeScheduleSlots(medicine)
+  const originalSlots = medicine.scheduleSlots || []
+  const scheduleSlots = normalizeScheduleSlots(medicine).map(ns => {
+    const original = originalSlots.find(os => os.slot === ns.slot)
+    return { mealTiming: "After Food", ...original, ...ns }
+  })
   const scheduleTimes = getScheduleTimesFromSlots(scheduleSlots)
   const dosesPerDay = medicine.dosesPerDay || (
     medicine.dosageFrequency === "Four Times Daily" ? 4 :
@@ -514,7 +518,10 @@ function Dashboard() {
       return
     }
 
-    const scheduleSlots = normalizeScheduleSlots(form)
+    const scheduleSlots = normalizeScheduleSlots(form).map(ns => {
+      const original = (form.scheduleSlots || []).find(os => os.slot === ns.slot)
+      return { mealTiming: "After Food", ...original, ...ns }
+    })
     if (scheduleSlots.length < 1 || scheduleSlots.some((entry) => !entry.time)) {
       alert("Select at least one schedule slot and set a reminder time.")
       return

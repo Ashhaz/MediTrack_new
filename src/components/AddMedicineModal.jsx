@@ -54,7 +54,10 @@ const getDefaultTimeForSlot = (slot) => {
 
 function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
   const isEdit = !!form.id
-  const scheduleSlots = normalizeScheduleSlots(form)
+  const scheduleSlots = normalizeScheduleSlots(form).map(ns => {
+    const original = (form.scheduleSlots || []).find(os => os.slot === ns.slot)
+    return { mealTiming: "After Food", ...original, ...ns }
+  })
   const doseCount = scheduleSlots.length
 
   const stockVal = Number(form.stock) || 0;
@@ -74,7 +77,11 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
 
   const updateScheduleSlots = (nextSlots) => {
     const normalizedSlots = normalizeScheduleSlots({ scheduleSlots: nextSlots })
-    onChange("scheduleSlots", normalizedSlots)
+    const preservedSlots = normalizedSlots.map(normSlot => {
+      const original = nextSlots.find(s => s.slot === normSlot.slot)
+      return { mealTiming: "After Food", ...original, ...normSlot }
+    })
+    onChange("scheduleSlots", preservedSlots)
     onChange("scheduleTimes", getScheduleTimesFromSlots(normalizedSlots))
     onChange("dosesPerDay", normalizedSlots.length)
     onChange("timeSlot", normalizedSlots[0]?.slot || "Morning")
@@ -86,7 +93,7 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
 
     const nextSlots = isSelected
       ? scheduleSlots.filter((entry) => entry.slot !== slot)
-      : [...scheduleSlots, { slot, time: getDefaultTimeForSlot(slot) }]
+      : [...scheduleSlots, { slot, time: getDefaultTimeForSlot(slot), mealTiming: "After Food" }]
 
     updateScheduleSlots(nextSlots.sort((first, second) => getSlotOrder(first.slot) - getSlotOrder(second.slot)))
   }
@@ -95,6 +102,14 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
     updateScheduleSlots(
       scheduleSlots.map((entry) =>
         entry.slot === slot ? { ...entry, time } : entry
+      )
+    )
+  }
+
+  const updateScheduleSlotMealTiming = (slot, mealTiming) => {
+    updateScheduleSlots(
+      scheduleSlots.map((entry) =>
+        entry.slot === slot ? { ...entry, mealTiming } : entry
       )
     )
   }
@@ -224,38 +239,49 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
                     <span>{option.label}</span>
                   </label>
                   {isSelected && (
-                    <div className="flex items-center gap-1 sm:justify-end">
-                      {(() => {
-                        const { hour, minute, period } = parse24to12(selectedSlot.time)
-                        const selectStyle = "rounded-lg border border-white/10 bg-black/40 p-1.5 text-xs font-bold text-white outline-none focus:border-emerald-300/40 transition appearance-none cursor-pointer text-center min-w-[48px]"
-                        
-                        return (
-                          <>
-                            <select
-                              value={hour}
-                              onChange={(e) => updateScheduleSlotTime(option.value, format12to24(e.target.value, minute, period))}
-                              className={selectStyle}
-                            >
-                              {HOURS.map(h => <option key={h} value={h} className="bg-[#071412]">{h}</option>)}
-                            </select>
-                            <span className="text-slate-600 font-bold">:</span>
-                            <select
-                              value={minute}
-                              onChange={(e) => updateScheduleSlotTime(option.value, format12to24(hour, e.target.value, period))}
-                              className={selectStyle}
-                            >
-                              {MINUTES.map(m => <option key={m} value={m} className="bg-[#071412]">{m}</option>)}
-                            </select>
-                            <select
-                              value={period}
-                              onChange={(e) => updateScheduleSlotTime(option.value, format12to24(hour, minute, e.target.value))}
-                              className={`${selectStyle} ml-1 min-w-[54px]`}
-                            >
-                              {PERIODS.map(p => <option key={p} value={p} className="bg-[#071412]">{p}</option>)}
-                            </select>
-                          </>
-                        )
-                      })()}
+                    <div className="flex flex-col gap-2 sm:items-end">
+                      <div className="flex items-center gap-1">
+                        {(() => {
+                          const { hour, minute, period } = parse24to12(selectedSlot.time)
+                          const selectStyle = "rounded-lg border border-white/10 bg-black/40 p-1.5 text-xs font-bold text-white outline-none focus:border-emerald-300/40 transition appearance-none cursor-pointer text-center min-w-[48px]"
+                          
+                          return (
+                            <>
+                              <select
+                                value={hour}
+                                onChange={(e) => updateScheduleSlotTime(option.value, format12to24(e.target.value, minute, period))}
+                                className={selectStyle}
+                              >
+                                {HOURS.map(h => <option key={h} value={h} className="bg-[#071412]">{h}</option>)}
+                              </select>
+                              <span className="text-slate-600 font-bold">:</span>
+                              <select
+                                value={minute}
+                                onChange={(e) => updateScheduleSlotTime(option.value, format12to24(hour, e.target.value, period))}
+                                className={selectStyle}
+                              >
+                                {MINUTES.map(m => <option key={m} value={m} className="bg-[#071412]">{m}</option>)}
+                              </select>
+                              <select
+                                value={period}
+                                onChange={(e) => updateScheduleSlotTime(option.value, format12to24(hour, minute, e.target.value))}
+                                className={`${selectStyle} ml-1 min-w-[54px]`}
+                              >
+                                {PERIODS.map(p => <option key={p} value={p} className="bg-[#071412]">{p}</option>)}
+                              </select>
+                            </>
+                          )
+                        })()}
+                      </div>
+                      <select
+                        value={selectedSlot.mealTiming || "After Food"}
+                        onChange={(e) => updateScheduleSlotMealTiming(option.value, e.target.value)}
+                        className="rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[10px] font-bold text-emerald-200/80 outline-none focus:border-emerald-300/40 transition cursor-pointer w-full sm:w-auto"
+                      >
+                        {mealOptions.filter(opt => ["Before Food", "After Food", "With Food", "Empty Stomach"].includes(opt)).map((opt) => (
+                          <option key={opt} value={opt} className="bg-[#071412]">{opt}</option>
+                        ))}
+                      </select>
                     </div>
                   )}
                 </div>

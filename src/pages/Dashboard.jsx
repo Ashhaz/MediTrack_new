@@ -51,8 +51,8 @@ const statusStyles = {
 const emptyForm = {
   name: "",
   dosage: "",
-  scheduleTimes: [],
-  scheduleSlots: [{ slot: "Morning", time: "" }],
+  scheduleTimes: ["08:00"],
+  scheduleSlots: [{ slot: "Morning", time: "08:00" }],
   timeSlot: "Morning",
   instructions: "",
   status: "Upcoming",

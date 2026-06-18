@@ -20,7 +20,10 @@ import {
   isMedicineScheduledOnDate, 
   getMinutesNow, 
   formatTimeForStorage, 
-  formatTimeForDisplay
+  formatTimeForDisplay,
+  getScheduleTimesFromSlots,
+  normalizeScheduleSlots,
+  normalizeTimeSlot
 } from "../utils/medicineUtils.js"
 import { calculateWeeklyAdherence } from "../utils/adherenceUtils.js"
 import MedicineName from "../components/MedicineName"
@@ -48,7 +51,9 @@ const statusStyles = {
 const emptyForm = {
   name: "",
   dosage: "",
-  scheduleTimes: ["08:00"],
+  scheduleTimes: [],
+  scheduleSlots: [{ slot: "Morning", time: "" }],
+  timeSlot: "Morning",
   instructions: "",
   status: "Upcoming",
   dosesPerDay: 1,
@@ -68,6 +73,11 @@ const DEMO_MEDS = [
     name: "Metformin",
     dosage: "500mg",
     scheduleTimes: ["08:00", "20:00"],
+    scheduleSlots: [
+      { slot: "Morning", time: "08:00" },
+      { slot: "Night", time: "20:00" },
+    ],
+    timeSlot: "Morning",
     instructions: "Take after meals for blood sugar support.",
     status: "Upcoming",
     dosesPerDay: 2,
@@ -85,6 +95,8 @@ const DEMO_MEDS = [
     name: "Vitamin D3",
     dosage: "2000 IU",
     scheduleTimes: ["09:00"],
+    scheduleSlots: [{ slot: "Morning", time: "09:00" }],
+    timeSlot: "Morning",
     instructions: "Support bone health and immunity.",
     status: "Upcoming",
     dosesPerDay: 1,
@@ -107,7 +119,8 @@ const normalizeMedicine = (medicine) => {
   if (!medicine || typeof medicine !== 'object') return null;
   
   // Migration logic
-  const scheduleTimes = medicine.scheduleTimes || medicine.reminderTimes || [medicine.time || "08:00"];
+  const scheduleSlots = normalizeScheduleSlots(medicine)
+  const scheduleTimes = getScheduleTimesFromSlots(scheduleSlots)
   const dosesPerDay = medicine.dosesPerDay || (
     medicine.dosageFrequency === "Four Times Daily" ? 4 :
     medicine.dosageFrequency === "Three Times Daily" ? 3 :
@@ -121,8 +134,10 @@ const normalizeMedicine = (medicine) => {
     medicineType: medicine.medicineType || medicine.type || "Tablet",
     mealTiming: medicine.mealTiming || "With Food",
     stock: Number(medicine.stock ?? 30),
-    dosesPerDay: Number(dosesPerDay),
-    scheduleTimes: Array.isArray(scheduleTimes) ? scheduleTimes.map(formatTimeForStorage) : ["08:00"],
+    dosesPerDay: scheduleSlots.length || Number(dosesPerDay),
+    scheduleSlots,
+    scheduleTimes,
+    timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(medicine.timeSlot),
     frequencyType: medicine.frequencyType || medicine.frequency || "Daily",
     instructions: medicine.instructions || medicine.instruction || "No instructions",
     createdAt: medicine.createdAt || medicine.id || Date.now(),
@@ -499,12 +514,22 @@ function Dashboard() {
       return
     }
 
+    const scheduleSlots = normalizeScheduleSlots(form)
+    if (scheduleSlots.length < 1 || scheduleSlots.some((entry) => !entry.time)) {
+      alert("Select at least one schedule slot and set a reminder time.")
+      return
+    }
+    const scheduleTimes = getScheduleTimesFromSlots(scheduleSlots)
+
     if (medicineToEdit) {
       setMedicineList(current => current.map(m => 
         m.id === medicineToEdit.id ? {
           ...m,
           ...form,
-          scheduleTimes: form.scheduleTimes.map(formatTimeForStorage),
+          scheduleSlots,
+          scheduleTimes,
+          dosesPerDay: scheduleSlots.length,
+          timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(form.timeSlot),
           startDate: form.startDate || getTodayKey(),
           updatedAt: Date.now()
         } : m
@@ -518,6 +543,8 @@ function Dashboard() {
 
   const addMedicine = () => {
     const now = Date.now()
+    const scheduleSlots = normalizeScheduleSlots(form)
+    const scheduleTimes = getScheduleTimesFromSlots(scheduleSlots)
 
     setMedicineList((current) => [
       ...current,
@@ -525,11 +552,13 @@ function Dashboard() {
         id: now,
         name: form.name,
         dosage: form.dosage,
-        scheduleTimes: form.scheduleTimes.map(formatTimeForStorage),
+        scheduleSlots,
+        scheduleTimes,
+        timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(form.timeSlot),
         instructions: form.instructions,
         status: "Upcoming",
         previousStatus: "Upcoming",
-        dosesPerDay: form.dosesPerDay || 1,
+        dosesPerDay: scheduleSlots.length,
         frequencyType: form.frequencyType || "Daily",
         medicineType: form.medicineType || "Tablet",
         mealTiming: form.mealTiming || "With Food",
@@ -629,9 +658,13 @@ function Dashboard() {
 
   const openEditModal = (medicine) => {
     setMedicineToEdit(medicine)
+    const scheduleSlots = normalizeScheduleSlots(medicine)
     setForm({
       ...medicine,
-      scheduleTimes: medicine.scheduleTimes.map(t => formatTimeForStorage(t))
+      scheduleSlots,
+      scheduleTimes: getScheduleTimesFromSlots(scheduleSlots),
+      dosesPerDay: scheduleSlots.length,
+      timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(medicine.timeSlot)
     })
     setIsModalOpen(true)
   }
@@ -955,6 +988,8 @@ function Dashboard() {
                 medicineType={medicine.medicineType}
                 stock={medicine.stock}
                 scheduleTimes={medicine.scheduleTimes}
+                scheduleSlots={medicine.scheduleSlots}
+                timeSlot={medicine.timeSlot}
                 time={formatTimeForDisplay(medicine.time)}
                 instructions={medicine.instructions}
                 status={medicine.status}
@@ -1115,6 +1150,8 @@ function Dashboard() {
                 type={medicine.type}
                 stock={medicine.stock}
                 reminderTimes={medicine.reminderTimes}
+                scheduleSlots={medicine.scheduleSlots}
+                timeSlot={medicine.timeSlot}
                 time={formatTimeForDisplay(medicine.time)}
                 instruction={medicine.instruction}
                 status={medicine.status}

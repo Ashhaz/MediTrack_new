@@ -1,25 +1,65 @@
 import React from "react"
+import {
+  getScheduleTimesFromSlots,
+  getSlotOrder,
+  normalizeScheduleSlots,
+  TIME_SLOT_OPTIONS,
+} from "../utils/medicineUtils.js"
 
 const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 const frequencyOptions = ["Daily", "Weekly", "Custom Days"]
-const dosageFrequencyOptions = ["Once Daily", "Twice Daily", "Three Times Daily", "Four Times Daily"]
 const typeOptions = ["Tablet", "Capsule", "Syrup", "Injection"]
 const mealOptions = ["Before Food", "After Food", "With Food", "Empty Stomach"]
 
-// Time selector constants
-const hours = Array.from({ length: 12 }, (_, i) => i + 1)
-const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"))
+const HOURS = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, "0"))
+const MINUTES = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, "0"))
+const PERIODS = ["AM", "PM"]
+
+/**
+ * Internal conversion from 24h format to 12h picker components
+ */
+const parse24to12 = (time24) => {
+  const [hStr, mStr] = (time24 || "08:00").split(":")
+  let h = parseInt(hStr, 10)
+  const period = h >= 12 ? "PM" : "AM"
+  h = h % 12
+  if (h === 0) h = 12
+  return { hour: h.toString().padStart(2, "0"), minute: mStr, period }
+}
+
+/**
+ * Internal conversion from 12h picker components to 24h format
+ */
+const format12to24 = (h12, m, p) => {
+  let h = parseInt(h12, 10)
+  if (p === "PM" && h < 12) h += 12
+  if (p === "AM" && h === 12) h = 0
+  return `${h.toString().padStart(2, "0")}:${m}`
+}
+
+/**
+ * Returns the default time for a given time slot.
+ * @param {string} slot - The time slot (e.g., "Morning", "Afternoon").
+ * @returns {string} The default time in "HH:MM" format.
+ */
+const getDefaultTimeForSlot = (slot) => {
+  switch (slot) {
+    case "Morning": return "08:00";
+    case "Afternoon": return "14:00"; // 02:00 PM
+    case "Evening": return "19:00"; // 07:00 PM
+    case "Night": return "22:00"; // 10:00 PM
+    default: return "";
+  }
+};
 
 function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
   const isEdit = !!form.id
-  const doseCount = Number(form.dosesPerDay) || 1
+  const scheduleSlots = normalizeScheduleSlots(form)
+  const doseCount = scheduleSlots.length
 
   const stockVal = Number(form.stock) || 0;
   const isValidCalc = stockVal > 0 && doseCount > 0;
   const estimatedDays = isValidCalc ? Math.floor(stockVal / doseCount) : 0;
-
-  // Initialize reminderTimes if not present
-  const currentTimes = form.scheduleTimes || ["08:00"]; // Ensure currentTimes is always an array
 
   /**
    * Toggles a weekday in the customDays array
@@ -32,28 +72,31 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
     onChange("customDays", nextDays)
   }
 
-  const handleTimeChangeAt = (index, type, value) => {
-    const times = [...currentTimes]
-    const [h, m] = (times[index] || "08:00").split(":")
-    let hVal = parseInt(h, 10) % 12 || 12
-    let mVal = m
-    let pVal = parseInt(h, 10) >= 12 ? "PM" : "AM"
-
-    if (type === "hour") hVal = parseInt(value, 10)
-    if (type === "minute") mVal = value
-    if (type === "period") pVal = value
-
-    const h24 = pVal === "PM" ? (hVal % 12) + 12 : hVal % 12
-    times[index] = `${String(h24).padStart(2, "0")}:${mVal}`
-    onChange("scheduleTimes", times)
+  const updateScheduleSlots = (nextSlots) => {
+    const normalizedSlots = normalizeScheduleSlots({ scheduleSlots: nextSlots })
+    onChange("scheduleSlots", normalizedSlots)
+    onChange("scheduleTimes", getScheduleTimesFromSlots(normalizedSlots))
+    onChange("dosesPerDay", normalizedSlots.length)
+    onChange("timeSlot", normalizedSlots[0]?.slot || "Morning")
   }
 
-  const handleDoseFrequencyChange = (val) => {
-    const count = val === "Four Times Daily" ? 4 : val === "Three Times Daily" ? 3 : val === "Twice Daily" ? 2 : 1
-    onChange("dosesPerDay", count)
-    const newTimes = [...currentTimes]
-    while(newTimes.length < count) newTimes.push("08:00")
-    onChange("scheduleTimes", newTimes.slice(0, count))
+  const toggleScheduleSlot = (slot) => {
+    const isSelected = scheduleSlots.some((entry) => entry.slot === slot)
+    if (isSelected && scheduleSlots.length === 1) return
+
+    const nextSlots = isSelected
+      ? scheduleSlots.filter((entry) => entry.slot !== slot)
+      : [...scheduleSlots, { slot, time: getDefaultTimeForSlot(slot) }]
+
+    updateScheduleSlots(nextSlots.sort((first, second) => getSlotOrder(first.slot) - getSlotOrder(second.slot)))
+  }
+
+  const updateScheduleSlotTime = (slot, time) => {
+    updateScheduleSlots(
+      scheduleSlots.map((entry) =>
+        entry.slot === slot ? { ...entry, time } : entry
+      )
+    )
   }
 
   return (
@@ -68,7 +111,7 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
             <h2 className="mt-1 text-3xl font-black text-white">{isEdit ? 'Edit Medicine' : 'Add Medicine'}</h2>
           </div>
           <button
-            type="button"
+              type="button"
             onClick={onClose}
             className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
           >
@@ -158,39 +201,63 @@ function AddMedicineModal({ form, onChange, onClose, onSubmit }) {
             </label>
           </div>
 
-          <label className="grid gap-1.5 text-sm font-semibold text-slate-200">
-            Doses Per Day
-            <select
-              value={doseCount === 4 ? "Four Times Daily" : doseCount === 3 ? "Three Times Daily" : doseCount === 2 ? "Twice Daily" : "Once Daily"}
-              onChange={(e) => handleDoseFrequencyChange(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 font-medium text-white outline-none transition focus:border-emerald-300/40"
-            >
-              {dosageFrequencyOptions.map(opt => <option key={opt} value={opt} className="bg-[#071412]">{opt}</option>)}
-            </select>
-          </label>
-
           <div className="space-y-3 rounded-2xl border border-white/5 bg-black/40 p-4">
-            {Array.from({ length: doseCount }).map((_, i) => {
-              const [h, m] = (currentTimes[i] || "08:00").split(":")
-              const dH = parseInt(h, 10) % 12 || 12
-              const dP = parseInt(h, 10) >= 12 ? "PM" : "AM"
+            <div>
+              <p className="text-sm font-semibold text-slate-200">Medication Schedule</p>
+              <p className="mt-1 text-[10px] font-medium text-slate-500">
+                Select at least one slot and set the exact reminder time.
+              </p>
+            </div>
+
+            {TIME_SLOT_OPTIONS.map((option) => {
+              const selectedSlot = scheduleSlots.find((entry) => entry.slot === option.value)
+              const isSelected = Boolean(selectedSlot)
               return (
-                <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_260px] gap-4 items-center min-w-0 overflow-hidden">
-                  {/* truncate ensures that long labels don't stretch the 1fr column */}
-                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-200/70 min-w-0 truncate">Dose {i + 1}</p>
-                  {/* Locked width container for time selects */}
-                  <div className="grid grid-cols-3 gap-2 min-w-0 shrink-0">
-                    <select value={dH} onChange={(e) => handleTimeChangeAt(i, "hour", e.target.value)} className="w-full rounded-lg bg-black/30 p-2 text-sm text-white outline-none focus:ring-1 focus:ring-emerald-500/50">
-                      {hours.map(h => <option key={h} value={h} className="bg-[#071412]">{h}</option>)}
-                    </select>
-                    <select value={m} onChange={(e) => handleTimeChangeAt(i, "minute", e.target.value)} className="w-full rounded-lg bg-black/30 p-2 text-sm text-white outline-none focus:ring-1 focus:ring-emerald-500/50">
-                      {minutes.map(m => <option key={m} value={m} className="bg-[#071412]">{m}</option>)}
-                    </select>
-                    <select value={dP} onChange={(e) => handleTimeChangeAt(i, "period", e.target.value)} className="w-full rounded-lg bg-black/30 p-2 text-sm text-white outline-none focus:ring-1 focus:ring-emerald-500/50">
-                      <option value="AM" className="bg-[#071412]">AM</option>
-                      <option value="PM" className="bg-[#071412]">PM</option>
-                    </select>
-                  </div>
+                <div key={option.value} className="grid grid-cols-1 gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3 sm:grid-cols-[1fr_180px] sm:items-center">
+                  <label className="flex items-center gap-3 text-sm font-bold text-slate-100">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleScheduleSlot(option.value)}
+                      className="h-4 w-4 accent-emerald-500"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                  {isSelected && (
+                    <div className="flex items-center gap-1 sm:justify-end">
+                      {(() => {
+                        const { hour, minute, period } = parse24to12(selectedSlot.time)
+                        const selectStyle = "rounded-lg border border-white/10 bg-black/40 p-1.5 text-xs font-bold text-white outline-none focus:border-emerald-300/40 transition appearance-none cursor-pointer text-center min-w-[48px]"
+                        
+                        return (
+                          <>
+                            <select
+                              value={hour}
+                              onChange={(e) => updateScheduleSlotTime(option.value, format12to24(e.target.value, minute, period))}
+                              className={selectStyle}
+                            >
+                              {HOURS.map(h => <option key={h} value={h} className="bg-[#071412]">{h}</option>)}
+                            </select>
+                            <span className="text-slate-600 font-bold">:</span>
+                            <select
+                              value={minute}
+                              onChange={(e) => updateScheduleSlotTime(option.value, format12to24(hour, e.target.value, period))}
+                              className={selectStyle}
+                            >
+                              {MINUTES.map(m => <option key={m} value={m} className="bg-[#071412]">{m}</option>)}
+                            </select>
+                            <select
+                              value={period}
+                              onChange={(e) => updateScheduleSlotTime(option.value, format12to24(hour, minute, e.target.value))}
+                              className={`${selectStyle} ml-1 min-w-[54px]`}
+                            >
+                              {PERIODS.map(p => <option key={p} value={p} className="bg-[#071412]">{p}</option>)}
+                            </select>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )}
                 </div>
               )
             })}

@@ -8,6 +8,12 @@ import {
   getMinutesNow, 
   formatTimeForStorage, 
   formatTimeForDisplay,
+  getScheduleTimesFromSlots,
+  getSlotOrder,
+  getTimeSlotDisplay,
+  normalizeScheduleSlots,
+  normalizeTimeSlot,
+  TIME_SLOT_OPTIONS,
   isDoseAfterMedicineCreation,
   isMedicineScheduledOnDate 
 } from "../utils/medicineUtils.js"
@@ -37,6 +43,8 @@ const emptyEditForm = {
   name: "",
   dosage: "",
   scheduleTimes: [],
+  scheduleSlots: [{ slot: "Morning", time: "08:00" }],
+  timeSlot: "Morning",
   instructions: "",
   status: "Upcoming",
   frequencyType: "Daily",
@@ -129,7 +137,8 @@ const normalizeMedicine = (medicine, minutesNow = getMinutesNow()) => {
 
   const todayKey = getTodayKey()
 
-  const scheduleTimes = medicine.scheduleTimes || medicine.reminderTimes || [medicine.time || "08:00"]
+  const scheduleSlots = normalizeScheduleSlots(medicine)
+  const scheduleTimes = getScheduleTimesFromSlots(scheduleSlots)
   const dosesPerDay = medicine.dosesPerDay || (
     medicine?.dosageFrequency === "Four Times Daily" ? 4 :
     medicine?.dosageFrequency === "Three Times Daily" ? 3 :
@@ -142,8 +151,10 @@ const normalizeMedicine = (medicine, minutesNow = getMinutesNow()) => {
     name: medicine.name || "Unknown Medicine",
     dosage: medicine.dosage || "No dosage set",
     instructions: medicine.instructions || medicine.instruction || "No instructions",
-    scheduleTimes: Array.isArray(scheduleTimes) ? scheduleTimes.map(formatTimeForStorage) : ["08:00"],
-    dosesPerDay: Number(dosesPerDay || 1),
+    scheduleSlots,
+    scheduleTimes,
+    timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(medicine.timeSlot),
+    dosesPerDay: scheduleSlots.length || Number(dosesPerDay || 1),
     frequencyType: medicine.frequencyType || medicine.frequency || "Daily",
     medicineType: medicine.medicineType || medicine.type || "Tablet",
     duration: medicine.duration || "Until Stopped",
@@ -363,12 +374,15 @@ function Medicines() {
   }, [selectedMedicine, medicineList])
 
   const openEditModal = (medicine) => {
+    const scheduleSlots = normalizeScheduleSlots(medicine)
     setMedicineToEdit(medicine)
     setNameError("")
     setEditForm({
       name: medicine.name,
       dosage: medicine.dosage,
-      scheduleTimes: medicine.scheduleTimes.map(formatTimeForStorage),
+      scheduleSlots,
+      scheduleTimes: getScheduleTimesFromSlots(scheduleSlots),
+      timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(medicine.timeSlot),
       instructions: medicine.instructions,
       status: medicine.status,
       frequencyType: medicine.frequencyType || "Daily",
@@ -381,6 +395,37 @@ function Medicines() {
 
   const updateEditForm = (field, value) => {
     setEditForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const updateEditScheduleSlots = (nextSlots) => {
+    const scheduleSlots = normalizeScheduleSlots({ scheduleSlots: nextSlots })
+    setEditForm((current) => ({
+      ...current,
+      scheduleSlots,
+      scheduleTimes: getScheduleTimesFromSlots(scheduleSlots),
+      dosesPerDay: scheduleSlots.length,
+      timeSlot: scheduleSlots[0]?.slot || "Morning",
+    }))
+  }
+
+  const toggleEditScheduleSlot = (slot) => {
+    const scheduleSlots = normalizeScheduleSlots(editForm)
+    const isSelected = scheduleSlots.some((entry) => entry.slot === slot)
+    if (isSelected && scheduleSlots.length === 1) return
+
+    const nextSlots = isSelected
+      ? scheduleSlots.filter((entry) => entry.slot !== slot)
+      : [...scheduleSlots, { slot, time: "" }]
+
+    updateEditScheduleSlots(nextSlots.sort((first, second) => getSlotOrder(first.slot) - getSlotOrder(second.slot)))
+  }
+
+  const updateEditScheduleSlotTime = (slot, time) => {
+    updateEditScheduleSlots(
+      normalizeScheduleSlots(editForm).map((entry) =>
+        entry.slot === slot ? { ...entry, time } : entry
+      )
+    )
   }
 
   const closeEditModal = () => {
@@ -405,6 +450,11 @@ function Medicines() {
     }
 
     setNameError("")
+    const scheduleSlots = normalizeScheduleSlots(editForm)
+    if (scheduleSlots.length < 1 || scheduleSlots.some((entry) => !entry.time)) {
+      alert("Select at least one schedule slot and set a reminder time.")
+      return
+    }
 
     setMedicineList((current) =>
       current.map((medicine) => {
@@ -416,7 +466,10 @@ function Medicines() {
           ...medicine,
           name: trimmedName,
           dosage: editForm.dosage,
-          scheduleTimes: editForm.scheduleTimes.map(formatTimeForStorage),
+          scheduleSlots,
+          scheduleTimes: getScheduleTimesFromSlots(scheduleSlots),
+          timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(editForm.timeSlot),
+          dosesPerDay: scheduleSlots.length,
           instructions: editForm.instructions,
           status: editForm.status,
           frequencyType: editForm.frequencyType,
@@ -435,7 +488,10 @@ function Medicines() {
             ...current,
             name: trimmedName,
             dosage: editForm.dosage,
-            scheduleTimes: editForm.scheduleTimes.map(formatTimeForStorage),
+            scheduleSlots,
+            scheduleTimes: getScheduleTimesFromSlots(scheduleSlots),
+            timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(editForm.timeSlot),
+            dosesPerDay: scheduleSlots.length,
             instructions: editForm.instructions,
             frequencyType: editForm.frequencyType,
             customDays: editForm.customDays,
@@ -645,9 +701,13 @@ function Medicines() {
                     )}
                   </div>
                   <p className="truncate text-sm text-slate-300">{medicine?.dosage || "N/A"}</p>
-                  <p className="truncate text-sm font-semibold text-white">
-                    {formatTimeForDisplay(medicine?.time)}
-                  </p>
+                  <div className="min-w-0 text-sm font-semibold text-white">
+                    {normalizeScheduleSlots(medicine).map((entry) => (
+                      <p key={entry.slot} className="truncate">
+                        {getTimeSlotDisplay(entry.slot)} • {formatTimeForDisplay(entry.time)}
+                      </p>
+                    ))}
+                  </div>
                 <div className="flex flex-col min-w-0">
                   {(() => {
                     const stockInfo = getStockStatus(medicine?.stock, medicine?.dosesPerDay);
@@ -761,13 +821,15 @@ function Medicines() {
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                    Scheduled time
+                    Medication Schedule
                   </p>
-                  <p className="mt-2 font-semibold text-slate-100">
-                    {selectedMedicineDetails?.scheduleTimes?.length > 0
-                      ? selectedMedicineDetails.scheduleTimes.map(t => formatTimeForDisplay(t)).join(" • ")
-                      : "Not scheduled"}
-                  </p>
+                  <div className="mt-2 space-y-1 font-semibold text-slate-100">
+                    {normalizeScheduleSlots(selectedMedicineDetails).map((entry) => (
+                      <p key={entry.slot}>
+                        {getTimeSlotDisplay(entry.slot)} • {formatTimeForDisplay(entry.time)}
+                      </p>
+                    ))}
+                  </div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -872,38 +934,54 @@ function Medicines() {
                 )}
               </label>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-2 text-sm font-semibold text-slate-200">
-                  Dosage
-                  <input
-                    required
-                    value={editForm.dosage}
-                    onChange={(event) =>
-                      updateEditForm("dosage", event.target.value)
-                    }
-                    className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 font-medium text-white outline-none transition focus:border-emerald-300/40 focus:bg-emerald-400/10"
-                  />
-                </label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-200">
+                Dosage
+                <input
+                  required
+                  value={editForm.dosage}
+                  onChange={(event) =>
+                    updateEditForm("dosage", event.target.value)
+                  }
+                  className="rounded-xl border border-white/10 bg-black/30 px-4 py-3 font-medium text-white outline-none transition focus:border-emerald-300/40 focus:bg-emerald-400/10"
+                />
+              </label>
 
-                <div className="grid gap-2 text-sm font-semibold text-slate-200">
-                  Schedules
-                  <div className="space-y-2">
-                    {editForm.scheduleTimes.map((time, idx) => (
-                      <input
-                        key={idx}
-                        required
-                        type="time"
-                        value={time}
-                        onChange={(e) => {
-                          const newTimes = [...editForm.scheduleTimes];
-                          newTimes[idx] = e.target.value;
-                          updateEditForm("scheduleTimes", newTimes);
-                        }}
-                        className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-white outline-none"
-                      />
-                    ))}
-                  </div>
+              <div className="space-y-3 rounded-2xl border border-white/5 bg-black/40 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-200">Medication Schedule</p>
+                  <p className="mt-1 text-[10px] font-medium text-slate-500">
+                    Select at least one slot and set the exact reminder time.
+                  </p>
                 </div>
+
+                {TIME_SLOT_OPTIONS.map((option) => {
+                  const scheduleSlots = normalizeScheduleSlots(editForm)
+                  const selectedSlot = scheduleSlots.find((entry) => entry.slot === option.value)
+                  const isSelected = Boolean(selectedSlot)
+
+                  return (
+                    <div key={option.value} className="grid grid-cols-1 gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3 sm:grid-cols-[1fr_170px] sm:items-center">
+                      <label className="flex items-center gap-3 text-sm font-bold text-slate-100">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleEditScheduleSlot(option.value)}
+                          className="h-4 w-4 accent-emerald-500"
+                        />
+                        <span>{option.label}</span>
+                      </label>
+                      {isSelected && (
+                        <input
+                          required
+                          type="time"
+                          value={selectedSlot.time}
+                          onChange={(event) => updateEditScheduleSlotTime(option.value, event.target.value)}
+                          className="w-full rounded-lg border border-white/10 bg-black/30 p-2 text-sm font-semibold text-white outline-none focus:border-emerald-300/40"
+                        />
+                      )}
+                    </div>
+                  )
+                })}
               </div>
 
               <label className="grid gap-2 text-sm font-semibold text-slate-200">

@@ -27,6 +27,11 @@ import {
   isMedicineScheduledOnDate,
   getMinutesNow,
   parseReminderTime,
+  formatTimeWithSlotLabel,
+  getTimeSlotDisplay,
+  normalizeScheduleSlots,
+  normalizeTimeSlot,
+  TIME_SLOT_OPTIONS,
 } from "../utils/medicineUtils.js";
 import { readJsonFromStorage } from "../utils/storageUtils.js";
 
@@ -209,7 +214,9 @@ const Reports = () => {
         const dateKey = getTodayKey(date);
 
         if (isMedicineScheduledOnDate(med, date)) {
+          const scheduleSlots = normalizeScheduleSlots(med);
           (med.scheduleTimes || []).forEach(time => {
+            const matchingSlot = scheduleSlots.find(slot => slot.time === time);
             const reminderMinutes = parseReminderTime(time);
             const isPast = i > 0 || (i === 0 && minutesNow > (reminderMinutes || 0) + 120);
             const historyEntry = (med.adherenceHistory || []).find(h => h.date === dateKey && h.time === time);
@@ -223,6 +230,7 @@ const Reports = () => {
                 name: med.name,
                 dosage: med.dosage,
                 time: time,
+                timeSlot: matchingSlot?.slot || normalizeTimeSlot(med.timeSlot),
                 status: historyEntry.status,
                 date: dateKey,
                 timestamp: new Date(`${dateKey}T${time}`).getTime()
@@ -233,6 +241,7 @@ const Reports = () => {
                 name: med.name,
                 dosage: med.dosage,
                 time: time,
+                timeSlot: matchingSlot?.slot || normalizeTimeSlot(med.timeSlot),
                 status: "Missed",
                 date: dateKey,
                 timestamp: new Date(`${dateKey}T${time}`).getTime()
@@ -246,6 +255,20 @@ const Reports = () => {
     return activities
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 10);
+  }, [medicineList]);
+
+  const medicinesByTimeSlot = useMemo(() => {
+    const activeMedicines = medicineList.filter((medicine) => !medicine.archived);
+
+    return TIME_SLOT_OPTIONS.map((slot) => ({
+      ...slot,
+      medicines: activeMedicines
+        .map((medicine) => ({
+          ...medicine,
+          slotSchedules: normalizeScheduleSlots(medicine).filter((entry) => entry.slot === slot.value),
+        }))
+        .filter((medicine) => medicine.slotSchedules.length > 0),
+    })).filter((group) => group.medicines.length > 0);
   }, [medicineList]);
 
   // Dynamic Adherence Chart (Mocking previous days, showing real today)
@@ -587,6 +610,35 @@ Medication Management Dashboard
             </div>
           </div>
 
+          {/* Time Slot Groups */}
+          {medicinesByTimeSlot.length > 0 && (
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 backdrop-blur-sm">
+              <h3 className="font-semibold text-lg mb-6">Medicines by Time Slot</h3>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {medicinesByTimeSlot.map((group) => (
+                  <section key={group.value} className="rounded-xl border border-zinc-800/70 bg-zinc-950/30 p-4">
+                    <h4 className="text-sm font-black text-white mb-3">
+                      {group.label} Medicines
+                    </h4>
+                    <div className="space-y-3">
+                      {group.medicines.map((medicine) => (
+                        <div key={medicine.id} className="flex items-center justify-between gap-3 rounded-lg bg-zinc-800/30 px-3 py-2">
+                          <div className="min-w-0">
+                            <MedicineName name={medicine.name} truncate={true} className="text-sm font-bold text-zinc-100" />
+                            <p className="text-xs text-zinc-500">{medicine.dosage || "No dosage set"}</p>
+                          </div>
+                          <span className="shrink-0 text-xs font-bold text-emerald-400">
+                            {medicine.slotSchedules.map((entry) => formatTimeWithSlotLabel(entry.time, entry.slot)).join(" • ")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Recent Activity Timeline */}
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 backdrop-blur-sm">
             <div className="flex items-center justify-between mb-6 px-1">
@@ -610,7 +662,7 @@ Medication Management Dashboard
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
                         <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> {log.time} ({log.dosage}) on {new Date(log.date).toLocaleDateString()}
+                          <Clock className="w-3 h-3" /> {formatTimeWithSlotLabel(log.time, log.timeSlot)} ({log.dosage}) on {new Date(log.date).toLocaleDateString()}
                         </span>
                         <span className="hidden sm:inline text-zinc-700">•</span>
                         <span>{log.status === 'Taken' ? 'Taken' : log.status}</span>

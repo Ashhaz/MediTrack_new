@@ -271,14 +271,6 @@ function Medicines() {
     };
 
     fetchMedicines();
-
-    const channel = supabase.channel('public:medicines-medicines-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'medicines' }, fetchMedicines)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    }
   }, [])
 
   const handleRefill = (medicineId) => {

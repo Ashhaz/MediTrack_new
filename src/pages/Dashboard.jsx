@@ -201,14 +201,6 @@ function Dashboard() {
     }
 
     fetchMedicines()
-
-    const channel = supabase.channel('public:medicines-dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'medicines' }, fetchMedicines)
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
   }, [])
 
   useEffect(() => {

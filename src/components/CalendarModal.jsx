@@ -1,5 +1,4 @@
-import React from "react"
-import { AlertTriangle, CheckCircle2, Clock } from "lucide-react"
+import { AlertTriangle, CheckCircle2 } from "lucide-react"
 
 const calendarStatusStyles = {
   Taken: "bg-emerald-400/15 text-emerald-100 border-emerald-500/20",

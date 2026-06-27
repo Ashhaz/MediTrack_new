@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 const MedicineName = ({ name, truncate = false, className = "" }) => {
   return (

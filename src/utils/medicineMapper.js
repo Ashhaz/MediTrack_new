@@ -1,0 +1,43 @@
+export const mapFromDb = (row) => ({
+  ...row,
+  name: row.medicine_name,
+  scheduleTimes: row.schedule_times,
+  scheduleSlots: row.schedule_slots,
+  dosesPerDay: row.doses_per_day,
+  timeSlot: row.time_slot,
+  frequencyType: row.frequency_type,
+  medicineType: row.medicine_type,
+  startDate: row.start_date,
+  endDate: row.end_date,
+  customDays: row.custom_days,
+  adherenceHistory: row.adherence_history,
+  previousStatus: row.previous_status,
+  notificationSentFor: row.notification_sent_for,
+  missedFor: row.missed_for,
+  createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+  updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now()
+});
+
+export const mapToDb = (med) => ({
+  medicine_name: med.name,
+  dosage: med.dosage,
+  instructions: med.instructions,
+  medicine_type: med.medicineType,
+  stock: med.stock,
+  doses_per_day: med.dosesPerDay,
+  schedule_slots: med.scheduleSlots,
+  schedule_times: med.scheduleTimes,
+  time_slot: med.timeSlot,
+  frequency_type: med.frequencyType,
+  duration: med.duration,
+  start_date: med.startDate,
+  end_date: med.endDate || null,
+  custom_days: med.customDays || [],
+  status: med.status,
+  previous_status: med.previousStatus,
+  archived: med.archived || false,
+  adherence_history: med.adherenceHistory || [],
+  notification_sent_for: med.notificationSentFor,
+  missed_for: med.missedFor,
+  updated_at: new Date().toISOString()
+});

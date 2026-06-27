@@ -25,10 +25,6 @@ const emitNotificationsUpdated = () => {
 
 export const getNotifications = () => {
   const storedNotifications = readJsonFromStorage(NOTIFICATION_STORAGE_KEY, [])
-  console.log("[MediTrack Notifications] Notifications read from storage", {
-    count: Array.isArray(storedNotifications) ? storedNotifications.length : 0,
-    validStorage: Array.isArray(storedNotifications),
-  })
 
   return Array.isArray(storedNotifications)
     ? storedNotifications
@@ -54,16 +50,7 @@ export const addNotification = ({
     type,
   })
 
-  console.log("[MediTrack Notifications] addNotification called", {
-    title,
-    message,
-    type,
-    timestamp,
-    normalized: Boolean(notification),
-  })
-
   if (!notification) {
-    console.warn("[MediTrack Notifications] Notification was not saved because it could not be normalized")
     return null
   }
 
@@ -72,10 +59,6 @@ export const addNotification = ({
     NOTIFICATION_STORAGE_KEY,
     JSON.stringify(nextNotifications),
   )
-  console.log("[MediTrack Notifications] Notification saved", {
-    id: notification.id,
-    storedCount: nextNotifications.length,
-  })
   emitNotificationsUpdated()
 
   return notification

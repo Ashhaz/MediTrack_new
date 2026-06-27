@@ -1,58 +1,79 @@
 import { HashRouter, Routes, Route } from "react-router-dom"
 
-import Home from "./pages/Home"
-import Dashboard from "./pages/Dashboard"
-import Medicines from "./pages/Medicines"
-import Reports from "./pages/Reports"
-import Settings from "./pages/Settings"
+import { lazy, Suspense } from "react";
+
+const Home = lazy(() => import("./pages/Home"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Medicines = lazy(() => import("./pages/Medicines"));
+const Login = lazy(() => import("./pages/Login"));
+const Register = lazy(() => import("./pages/Register"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Settings = lazy(() => import("./pages/Settings"));
 import AppShell from "./components/AppShell"
-import { useMedicationReminders } from "./hooks/useMedicationReminders"
+import ProtectedRoute from "./components/ProtectedRoute";
+
+
+const LoadingScreen = () => (
+  <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-slate-900">
+    <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent"></div>
+  </div>
+);
 
 function App() {
-  useMedicationReminders()
-
   return (
     <HashRouter>
-      <Routes>
+      <Suspense fallback={<LoadingScreen />}>
+        <Routes>
 
         <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
         <Route
           path="/dashboard"
           element={
-            <AppShell>
-              <Dashboard />
-            </AppShell>
+            <ProtectedRoute>
+              <AppShell>
+                <Dashboard />
+              </AppShell>
+            </ProtectedRoute>
           }
         />
 
         <Route
           path="/medicines"
           element={
-            <AppShell>
-              <Medicines />
-            </AppShell>
+            <ProtectedRoute>
+              <AppShell>
+                <Medicines />
+              </AppShell>
+            </ProtectedRoute>
           }
         />
 
         <Route
           path="/reports"
           element={
-            <AppShell>
-              <Reports />
-            </AppShell>
+            <ProtectedRoute>
+              <AppShell>
+                <Reports />
+              </AppShell>
+            </ProtectedRoute>
           }
         />
 
         <Route
           path="/settings"
           element={
-            <AppShell>
-              <Settings />
-            </AppShell>
+            <ProtectedRoute>
+              <AppShell>
+                <Settings />
+              </AppShell>
+            </ProtectedRoute>
           }
         />
-      </Routes>
+        </Routes>
+      </Suspense>
     </HashRouter>
   )
 }

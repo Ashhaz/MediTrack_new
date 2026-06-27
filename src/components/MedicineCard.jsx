@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { getStockStatus } from "../utils/stockUtils.js"
 import { formatTimeWithSlotLabel, getTimeSlotDisplay } from "../utils/medicineUtils.js"
 
@@ -42,7 +42,7 @@ const statusStyles = {
   Taken: "bg-emerald-400/15 text-emerald-100 shadow-lg shadow-emerald-950/20",
   "Completed Course": "bg-slate-500/20 text-slate-300 border border-white/10 shadow-none",
 }
-const lowStockStyle = "bg-rose-500/20 text-rose-300 border-rose-500/30"
+
 
 function MedicineCard({
   id,
@@ -54,20 +54,18 @@ function MedicineCard({
   status,
   medicineType,
   stock,
-  startDate,
-  endDate,
+
   reminderTimes = [],
   accentIndex = 0,
   onMarkTaken,
   onMarkMissed,
   onEdit,
   onRefill,
-  onRestart,
-  onArchive,
+
   onDelete,
 }) {
   const [showConfirm, setShowConfirm] = useState(false)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
+
   const accent = accents[accentIndex % accents.length]
   const isTaken = status === "Taken"
   const isMissed = status === "Missed" && status !== "Completed Course"

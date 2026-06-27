@@ -32,17 +32,7 @@ export const registerMediTrackServiceWorker = async () => {
   const serviceWorkerUrl = getServiceWorkerUrl()
   const serviceWorkerScope = getServiceWorkerScope()
 
-  console.log("[MediTrack Notifications] Service worker registration requested", {
-    baseUrl: import.meta.env.BASE_URL,
-    pageUrl: window.location.href,
-    serviceWorkerUrl: serviceWorkerUrl.href,
-    serviceWorkerScope: serviceWorkerScope.href,
-    secureContext: window.isSecureContext,
-    serviceWorkerSupported: "serviceWorker" in navigator,
-  })
-
   if (!("serviceWorker" in navigator)) {
-    console.warn("[MediTrack Notifications] Service workers are not supported")
     return null
   }
 
@@ -52,21 +42,6 @@ export const registerMediTrackServiceWorker = async () => {
       { scope: serviceWorkerScope },
     )
 
-    registration.addEventListener("updatefound", () => {
-      console.log("[MediTrack Notifications] Service worker update found", {
-        scope: registration.scope,
-      })
-    })
-
-    console.log(
-      "[MediTrack Notifications] Service worker registered",
-      {
-        scope: registration.scope,
-        active: Boolean(registration.active),
-        installing: Boolean(registration.installing),
-        waiting: Boolean(registration.waiting),
-      },
-    )
 
     return registration
   } catch (error) {
@@ -80,13 +55,8 @@ export const registerMediTrackServiceWorker = async () => {
 
 export const requestNotificationPermission = async () => {
   if (!("Notification" in window)) {
-    console.warn("[MediTrack Notifications] Notification API is not supported")
     return "unsupported"
   }
-
-  console.log("[MediTrack Notifications] Notification permission check", {
-    permission: Notification.permission,
-  })
 
   if (Notification.permission !== "default") {
     return Notification.permission
@@ -94,9 +64,6 @@ export const requestNotificationPermission = async () => {
 
   try {
     const permission = await Notification.requestPermission()
-    console.log("[MediTrack Notifications] Notification permission request result", {
-      permission,
-    })
     return permission
   } catch (error) {
     console.error("[MediTrack Notifications] Notification permission request failed", error)
@@ -105,12 +72,6 @@ export const requestNotificationPermission = async () => {
 }
 
 const showConstructorNotification = (title, options) => {
-  console.log("[MediTrack Notifications] Trying Notification constructor fallback", {
-    title,
-    tag: options.tag,
-    permission: Notification.permission,
-  })
-
   const notification = new Notification(title, options)
 
   notification.onclick = (event) => {
@@ -118,11 +79,6 @@ const showConstructorNotification = (title, options) => {
     window.focus()
     notification.close()
   }
-
-  console.log("[MediTrack Notifications] Notification constructor fallback shown", {
-    title,
-    tag: options.tag,
-  })
 
   return {
     shown: true,
@@ -134,17 +90,7 @@ const showConstructorNotification = (title, options) => {
 export const showServiceWorkerNotification = async (title, options = {}) => {
   const notificationOptions = createNotificationOptions(options)
 
-  console.log("[MediTrack Notifications] Browser notification requested", {
-    title,
-    tag: options.tag,
-    permission: "Notification" in window ? Notification.permission : "unsupported",
-    serviceWorkerSupported: "serviceWorker" in navigator,
-    visibilityState: document.visibilityState,
-    pageUrl: window.location.href,
-  })
-
   if (!("Notification" in window)) {
-    console.warn("[MediTrack Notifications] Notifications are not supported")
     return {
       shown: false,
       method: "unsupported",
@@ -153,10 +99,6 @@ export const showServiceWorkerNotification = async (title, options = {}) => {
   }
 
   if (Notification.permission !== "granted") {
-    console.warn(
-      "[MediTrack Notifications] Notification permission is not granted",
-      Notification.permission,
-    )
     return {
       shown: false,
       method: "permission",
@@ -165,7 +107,6 @@ export const showServiceWorkerNotification = async (title, options = {}) => {
   }
 
   if (!("serviceWorker" in navigator)) {
-    console.warn("[MediTrack Notifications] Service workers are not supported; using constructor fallback")
     try {
       return showConstructorNotification(title, notificationOptions)
     } catch (error) {
@@ -182,24 +123,11 @@ export const showServiceWorkerNotification = async (title, options = {}) => {
     await registerMediTrackServiceWorker()
     const registration = await waitForServiceWorkerReady()
 
-    console.log("[MediTrack Notifications] Service worker ready for notification", {
-      scope: registration.scope,
-      active: Boolean(registration.active),
-      showNotificationSupported:
-        typeof registration.showNotification === "function",
-    })
-
     if (typeof registration.showNotification !== "function") {
       throw new Error("registration.showNotification is unavailable")
     }
 
     await registration.showNotification(title, notificationOptions)
-
-    console.log("[MediTrack Notifications] Service worker notification shown", {
-      title,
-      tag: options.tag,
-      scope: registration.scope,
-    })
 
     return {
       shown: true,

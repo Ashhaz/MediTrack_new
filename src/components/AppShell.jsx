@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom"
+import { useMedicationReminders } from "../hooks/useMedicationReminders"
 
 const navItems = [
   {
@@ -31,6 +32,7 @@ const navItems = [
 
 function AppShell({ children }) {
   const { pathname } = useLocation()
+  useMedicationReminders()
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#04110f] text-white">

@@ -13,8 +13,9 @@ import {
 } from "../utils/notificationUtils.js"
 import { showServiceWorkerNotification } from "../utils/serviceWorkerNotifications.js"
 import { readJsonFromStorage, safeParseJson } from "../utils/storageUtils.js"
+import { supabase } from "../lib/supabase.js"
+import { mapFromDb } from "../utils/medicineMapper.js"
 
-const STORAGE_KEY = "meditrack.medicines"
 const CLEAR_KEY = "meditrack.historyCleared"
 const REMINDER_WINDOW_MINUTES = 30
 const CHECK_INTERVAL_MS = 30000
@@ -100,18 +101,7 @@ const getNotificationSettings = () => {
 }
 
 const notifyDoseDue = async (medicine, time) => {
-  console.log("[MediTrack Reminders] notifyDoseDue called", {
-    medicineId: medicine?.id,
-    medicineName: medicine?.name,
-    time,
-    permission: "Notification" in window ? Notification.permission : "unsupported",
-  })
-
   if (!("Notification" in window) || Notification.permission !== "granted") {
-    console.warn(
-      "[MediTrack Notifications] Dose reminder skipped because permission is not granted",
-      "Notification" in window ? Notification.permission : "unsupported",
-    )
     return false
   }
 
@@ -120,37 +110,13 @@ const notifyDoseDue = async (medicine, time) => {
   const slot = (medicine.scheduleSlots || []).find(s => s.time === time);
   const mealTiming = slot?.mealTiming || medicine.mealTiming || "After Food";
   const message = `Scheduled for ${displayTime}${medicine.dosage ? ` (${medicine.dosage})` : ""}${mealTiming ? ` - ${mealTiming}` : ""}.`
-  const notificationResult = await showServiceWorkerNotification(title, {
+
+  await showServiceWorkerNotification(title, {
     body: message,
     tag: `meditrack-${medicine.id}-${getTodayKey()}-${time}`,
     requireInteraction: true,
   })
 
-  console.log("[MediTrack Reminders] Browser notification result", {
-    medicineId: medicine?.id,
-    medicineName: medicine?.name,
-    time,
-    shown: notificationResult.shown,
-    method: notificationResult.method,
-    error: notificationResult.error,
-  })
-
-  if (!notificationResult.shown) {
-    console.warn("[MediTrack Reminders] Browser notification was not shown; saving in-app notification for visibility", {
-      medicineId: medicine?.id,
-      medicineName: medicine?.name,
-      time,
-      method: notificationResult.method,
-      error: notificationResult.error,
-    })
-  }
-
-  console.log("[MediTrack Reminders] addNotification called for dose reminder", {
-    title,
-    message,
-    medicineId: medicine?.id,
-    time,
-  })
   const savedNotification = addNotification({
     title,
     message,
@@ -160,35 +126,32 @@ const notifyDoseDue = async (medicine, time) => {
   return Boolean(savedNotification)
 }
 
-const readMedicines = () => {
-  const medicines = readJsonFromStorage(STORAGE_KEY, [])
-  if (!Array.isArray(medicines)) {
-    console.warn("[MediTrack Reminders] Stored medicines were not an array; using an empty list", {
-      storedType: typeof medicines,
-    })
+const readMedicines = async () => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) return []
+
+  const { data, error } = await supabase
+    .from("medicines")
+    .select("*")
+    .eq("user_id", session.user.id)
+
+  if (error) {
+    console.error("Failed to fetch medicines for reminders:", error)
     return []
   }
 
-  console.log("[MediTrack Reminders] Medicines read from storage", {
-    count: medicines.length,
-  })
+  const medicines = data ? data.map(mapFromDb) : []
   return medicines
 }
 
 const writeMedicines = (medicines) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(medicines))
-  console.log("[MediTrack Reminders] Medicines written after reminder check", {
-    count: medicines.length,
-  })
+  localStorage.setItem("meditrack.medicines", JSON.stringify(medicines))
   window.dispatchEvent(new Event("meditrack-data-updated"))
 }
 
 const checkMedicationReminders = async () => {
   const notificationSettings = getNotificationSettings()
   if (notificationSettings.doseReminders === false) {
-    console.log("[MediTrack Reminders] Reminder check skipped because dose reminders are disabled", {
-      notificationSettings,
-    })
     return
   }
 
@@ -196,47 +159,17 @@ const checkMedicationReminders = async () => {
   const todayKey = getTodayKey(today)
   const minutesNow = getMinutesNow()
   const historyCleared = Number(localStorage.getItem(CLEAR_KEY) || 0)
-  const medicines = readMedicines()
+  const medicines = await readMedicines()
   let didChange = false
-
-  console.log("[MediTrack Reminders] Reminder check start", {
-    todayKey,
-    currentTime: today.toLocaleTimeString(),
-    minutesNow,
-    historyCleared,
-    medicineCount: medicines.length,
-    notificationPermission:
-      "Notification" in window ? Notification.permission : "unsupported",
-    notificationSettings,
-  })
 
   const nextMedicines = await Promise.all(
     medicines.map(async (medicine) => {
       const scheduledToday = isMedicineScheduledOnDate(medicine, today)
-      console.log("[MediTrack Reminders] Medicine scanned", {
-        medicineId: medicine?.id,
-        medicineName: medicine?.name,
-        archived: Boolean(medicine?.archived),
-        hasScheduleTimes: Array.isArray(medicine?.scheduleTimes),
-        scheduleTimes: medicine?.scheduleTimes,
-        scheduledToday,
-        notificationSentFor: medicine?.notificationSentFor || null,
-      })
-
       if (
         medicine?.archived ||
         !Array.isArray(medicine?.scheduleTimes) ||
         !scheduledToday
       ) {
-        console.log("[MediTrack Reminders] Medicine skipped", {
-          medicineId: medicine?.id,
-          medicineName: medicine?.name,
-          reason: medicine?.archived
-            ? "archived"
-            : !Array.isArray(medicine?.scheduleTimes)
-              ? "missing scheduleTimes"
-              : "not scheduled today",
-        })
         return medicine
       }
 
@@ -245,34 +178,15 @@ const checkMedicationReminders = async () => {
       for (const time of medicine.scheduleTimes) {
         const reminderMinutes = parseReminderTime(time)
         if (reminderMinutes === null) {
-          console.warn("[MediTrack Reminders] Dose skipped because reminder time is invalid", {
-            medicineId: medicine?.id,
-            medicineName: medicine?.name,
-            time,
-          })
           continue
         }
 
         const doseDateTime = new Date(`${todayKey}T${time}`).getTime()
         if (doseDateTime < historyCleared) {
-          console.log("[MediTrack Reminders] Dose skipped because it is before history reset", {
-            medicineId: medicine?.id,
-            medicineName: medicine?.name,
-            time,
-            doseDateTime,
-            historyCleared,
-          })
           continue
         }
 
         if (!isDoseAfterMedicineCreation(medicine, todayKey, time)) {
-          console.log("[MediTrack Reminders] Dose skipped because it was scheduled before medicine creation", {
-            medicineId: medicine?.id,
-            medicineName: medicine?.name,
-            time,
-            doseDateTime,
-            createdAt: medicine?.createdAt,
-          })
           continue
         }
 
@@ -284,25 +198,12 @@ const checkMedicationReminders = async () => {
           historyCleared,
         )
         const notificationKey = `${todayKey}-${time}`
-        const notificationAlreadySent =
+        const alreadyNotified =
           medCopy.notificationSentFor === notificationKey
 
-        console.log("[MediTrack Reminders] Dose status calculated", {
-          medicineId: medCopy?.id,
-          medicineName: medCopy?.name,
-          time,
-          reminderMinutes,
-          minutesNow,
-          doseStatus,
-          notificationSentFor: medCopy?.notificationSentFor || null,
-          expectedNotificationSentFor: notificationKey,
-          notificationAlreadySent,
-        })
+        const conditionMet = ["Due Soon", "Due Now", "Delayed"].includes(doseStatus) && !alreadyNotified;
 
-        if (
-          ["Due Soon", "Due Now", "Delayed"].includes(doseStatus) &&
-          !notificationAlreadySent
-        ) {
+        if (conditionMet) {
           const didNotify = await notifyDoseDue(medCopy, time)
 
           if (didNotify) {
@@ -312,34 +213,11 @@ const checkMedicationReminders = async () => {
               updatedAt: Date.now(),
             }
             didChange = true
-            console.log("[MediTrack Reminders] notificationSentFor updated", {
-              medicineId: medCopy?.id,
-              medicineName: medCopy?.name,
-              notificationSentFor: notificationKey,
-            })
-          } else {
-            console.warn("[MediTrack Reminders] notifyDoseDue returned false; notificationSentFor was not updated", {
-              medicineId: medCopy?.id,
-              medicineName: medCopy?.name,
-              time,
-              notificationSentFor: medCopy?.notificationSentFor || null,
-            })
           }
-
           continue
         }
 
-        if (
-          ["Due Soon", "Due Now", "Delayed"].includes(doseStatus) &&
-          notificationAlreadySent
-        ) {
-          console.log("[MediTrack Reminders] notificationSentFor prevented duplicate notification", {
-            medicineId: medCopy?.id,
-            medicineName: medCopy?.name,
-            time,
-            notificationSentFor: medCopy?.notificationSentFor,
-          })
-        }
+
 
         const alreadyRecorded = (medCopy.adherenceHistory || []).some(
           (entry) => entry.date === todayKey && entry.time === time,

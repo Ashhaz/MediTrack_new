@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { supabase } from "../lib/supabase.js"
 import { 
   Clock, 
   Calendar, 
@@ -6,12 +7,10 @@ import {
   Package, 
   Activity, 
   CheckCircle2, 
-  Layers,
   XCircle,
   BarChart3,
   Timer,
-  BellRing,
-  Info
+  BellRing
 } from "lucide-react"
 import { 
   getTodayKey, 
@@ -19,7 +18,6 @@ import {
   isDoseAfterMedicineCreation,
   isMedicineScheduledOnDate, 
   getMinutesNow, 
-  formatTimeForStorage, 
   formatTimeForDisplay,
   getScheduleTimesFromSlots,
   normalizeScheduleSlots,
@@ -33,10 +31,10 @@ import AddMedicineModal from "../components/AddMedicineModal"
 import CalendarModal from "../components/CalendarModal"
 import MedicineCard from "../components/MedicineCard"
 import NotificationCenter from "../components/NotificationCenter.jsx"
-import { medicines } from "../data/medicines"
-import { readJsonFromStorage } from "../utils/storageUtils.js"
 
-const STORAGE_KEY = "meditrack.medicines"
+import { mapFromDb, mapToDb } from "../utils/medicineMapper.js"
+import { medicineCache } from "../store/medicineCache.js"
+
 const CLEAR_KEY = "meditrack.historyCleared"
 const statusStyles = {
   "Due Now": "bg-amber-400/20 text-amber-100 border border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.1)]",
@@ -66,53 +64,9 @@ const emptyForm = {
   customDays: [],
 }
 
-const DEMO_MEDS = [
-  {
-    id: 1,
-    name: "Metformin",
-    dosage: "500mg",
-    scheduleTimes: ["08:00", "20:00"],
-    scheduleSlots: [
-      { slot: "Morning", time: "08:00" },
-      { slot: "Night", time: "20:00" },
-    ],
-    timeSlot: "Morning",
-    instructions: "Take after meals for blood sugar support.",
-    status: "Upcoming",
-    dosesPerDay: 2,
-    frequencyType: "Daily",
-    medicineType: "Tablet",
-    mealTiming: "After Food",
-    stock: 45,
-    startDate: getTodayKey(),
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    adherenceHistory: [{ date: getTodayKey(), time: "08:00", status: "Taken" }]
-  },
-  {
-    id: 2,
-    name: "Vitamin D3",
-    dosage: "2000 IU",
-    scheduleTimes: ["09:00"],
-    scheduleSlots: [{ slot: "Morning", time: "09:00" }],
-    timeSlot: "Morning",
-    instructions: "Support bone health and immunity.",
-    status: "Upcoming",
-    dosesPerDay: 1,
-    frequencyType: "Daily",
-    medicineType: "Capsule",
-    mealTiming: "With Food",
-    stock: 60,
-    startDate: getTodayKey(),
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    adherenceHistory: []
-  }
-]
-
 const REMINDER_WINDOW_MINUTES = 30
 
-const frequencyOptions = ["Daily", "Weekly", "Custom Days"]
+
 
 const normalizeMedicine = (medicine) => {
   if (!medicine || typeof medicine !== 'object') return null;
@@ -186,21 +140,9 @@ const normalizeInitialStatus = (medicine) => ({
   status: medicine?.status || "Upcoming",
 })
 
-const getInitialMedicines = () => {
-  const parsedMedicines = readJsonFromStorage(STORAGE_KEY, [])
-  const validMeds = Array.isArray(parsedMedicines) ? parsedMedicines : []
-
-  return validMeds
-    .map(normalizeMedicine)
-    .filter(Boolean)
-    .map(normalizeInitialStatus)
-}
-
-const medicineListsMatch = (firstList, secondList) =>
-  JSON.stringify(firstList) === JSON.stringify(secondList)
 
 function Dashboard() {
-  const [medicineList, setMedicineList] = useState(getInitialMedicines)
+  const [medicineList, setMedicineList] = useState([])
   const [searchQuery, setSearchQuery] = useState("")
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
@@ -209,35 +151,63 @@ function Dashboard() {
   const [medicineToRefill, setMedicineToRefill] = useState(null)
   const [refillAmount, setRefillAmount] = useState(30)
   const [refillSuccess, setRefillSuccess] = useState(false)
-  const [nameError, setNameError] = useState("")
+  const [, setNameError] = useState("")
   const [form, setForm] = useState(emptyForm)
-  const [timeTick, setTimeTick] = useState(Date.now())
-  const [notificationPermission, setNotificationPermission] = useState(() =>
+  const [timeTick, setTimeTick] = useState(() => Date.now())
+  const [, setNotificationPermission] = useState(() =>
     "Notification" in window ? Notification.permission : "unsupported",
   )
-
+  const [userName, setUserName] = useState(() => localStorage.getItem("meditrack.userName") || "")
   useEffect(() => {
-    // Save medicine list to localStorage whenever it changes
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(medicineList))
-    window.dispatchEvent(new Event('meditrack-data-updated')); // Dispatch custom event
-  }, [medicineList])
+    const fetchMedicines = async () => {
+      // --- Stale-while-revalidate: show cached data immediately ---
+      const cached = medicineCache.get()
+      if (cached) {
+        const mappedFromDb = cached.map(mapFromDb)
+        const normalized = mappedFromDb.map(normalizeMedicine).filter(Boolean)
+        setMedicineList(normalized.map(normalizeInitialStatus))
+      }
 
-  useEffect(() => {
-    const syncMedicinesFromStorage = () => {
-      const storedMedicines = getInitialMedicines()
-      setMedicineList((currentMedicines) =>
-        medicineListsMatch(currentMedicines, storedMedicines)
-          ? currentMedicines
-          : storedMedicines,
-      )
+      // Deduplicate: skip if another page is already fetching
+      if (medicineCache.isFetching()) return
+      medicineCache.setFetching(true)
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+
+        const { data, error } = await supabase
+          .from("medicines")
+          .select("*")
+          .eq("user_id", session.user.id)
+
+        if (error) {
+          console.error("Dashboard fetch error:", error)
+          return
+        }
+
+        if (data) {
+          // Update cache with fresh raw rows
+          medicineCache.set(data)
+
+          const mappedFromDb = data.map(mapFromDb)
+          const normalized = mappedFromDb.map(normalizeMedicine).filter(Boolean)
+          const finalRows = normalized.map(normalizeInitialStatus)
+          setMedicineList(finalRows)
+        }
+      } finally {
+        medicineCache.setFetching(false)
+      }
     }
 
-    window.addEventListener("meditrack-data-updated", syncMedicinesFromStorage)
-    window.addEventListener("storage", syncMedicinesFromStorage)
+    fetchMedicines()
+
+    const channel = supabase.channel('public:medicines-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'medicines' }, fetchMedicines)
+      .subscribe()
 
     return () => {
-      window.removeEventListener("meditrack-data-updated", syncMedicinesFromStorage)
-      window.removeEventListener("storage", syncMedicinesFromStorage)
+      supabase.removeChannel(channel)
     }
   }, [])
 
@@ -256,7 +226,32 @@ function Dashboard() {
     }
   }, [])
 
-  const activeMedicines = medicineList.filter(m => !m.archived && isMedicineScheduledToday(m));
+  useEffect(() => {
+    const fetchUser = async () => {
+      let { data: { session } } = await supabase.auth.getSession()
+      let user = session?.user
+      if (!user) {
+        const { data } = await supabase.auth.getUser()
+        user = data?.user
+      }
+      if (user) {
+        const metadata = user.user_metadata || {}
+        let nameToUse = metadata.full_name || metadata.name || metadata.username
+        if (!nameToUse && user.email) {
+          nameToUse = user.email.split('@')[0]
+        }
+        const finalName = nameToUse || "User"
+        setUserName(finalName)
+        localStorage.setItem("meditrack.userName", finalName)
+      }
+    }
+    fetchUser()
+  }, [])
+
+  const activeMedicines = medicineList.filter(m => {
+    const isActive = !m.archived && isMedicineScheduledToday(m);
+    return isActive;
+  });
   const completedMedicines = medicineList.filter(m => !m.archived && !isMedicineScheduledToday(m) && (m.status === "Completed Course" || (m.endDate && getTodayKey() > m.endDate)));
 
   const filteredMedicines = activeMedicines.filter((medicine) =>
@@ -270,13 +265,15 @@ function Dashboard() {
       doses.find((d) => d.status !== "Taken") ||
       doses[doses.length - 1] ||
       { time: "08:00", status: "Upcoming" }
-    return { ...med, status: activeDose.status, time: activeDose.time }
+    
+    const finalMed = { ...med, status: activeDose.status, time: activeDose.time };
+    return finalMed;
   })
 
   const greeting = useMemo(() => {
     const hour = new Date(timeTick).getHours()
     if (hour < 12) return "Good Morning"
-    if (hour < 18) return "Good Afternoon"
+    if (hour < 17) return "Good Afternoon"
     return "Good Evening"
   }, [timeTick])
 
@@ -311,7 +308,7 @@ function Dashboard() {
     for (let i = 0; i < 7; i++) {
       const date = new Date()
       date.setDate(date.getDate() + i)
-      const dateKey = getTodayKey(date)
+
       
       const dayMeds = medicineList
         .filter(m => !m.archived && isMedicineScheduledOnDate(m, date))
@@ -328,7 +325,7 @@ function Dashboard() {
       if (dayMeds.length > 0) schedule.push({ date, items: dayMeds })
     }
     return schedule
-  }, [medicineList, timeTick])
+  }, [medicineList])
 
   const filteredCompleted = completedMedicines.filter(m => 
     m.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -338,7 +335,7 @@ function Dashboard() {
     () => {
       const allDoses = []
       const historyCleared = Number(localStorage.getItem(CLEAR_KEY) || 0)
-      const todayKey = getTodayKey()
+
 
       medicineList.filter(m => isMedicineScheduledOnDate(m, new Date())).forEach(med => {
         med.scheduleTimes.forEach(time => {
@@ -453,6 +450,7 @@ function Dashboard() {
 
     const actualTotal = total;
     const weeklyPercentage = calculateWeeklyAdherence(medicineList);
+    const todayPercentage = actualTotal > 0 ? Math.round((completed / actualTotal) * 100) : 0;
     const dailyScore = Math.min(100, Math.max(0, Math.round(((completed + (actualTotal - completed - missed) * 0.5) / (actualTotal || 1)) * 100)));
 
     return {
@@ -460,6 +458,7 @@ function Dashboard() {
       missed,
       upcomingCount,
       weeklyPercentage,
+      todayPercentage,
       streak,
       dailyScore,
       lowStockCount,
@@ -471,23 +470,11 @@ function Dashboard() {
       nextRunningOut
     }
   }, [medicineList])
-
-  const hasAdherenceData = adherenceStats.weeklyPercentage !== null;
   
   const criticalInventory = useMemo(() => 
     medicineList.filter(m => !m.archived && getStockStatus(m.stock, m.dosesPerDay).status !== "Healthy"), 
     [medicineList]
   );
-
-  const requestNotificationPermission = async () => {
-    if (!("Notification" in window)) {
-      setNotificationPermission("unsupported")
-      return
-    }
-
-    const permission = await Notification.requestPermission()
-    setNotificationPermission(permission)
-  }
 
   const updateForm = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }))
@@ -499,7 +486,7 @@ function Dashboard() {
     setForm(emptyForm)
   }
 
-  const handleFormSubmit = (event) => {
+  const handleFormSubmit = async (event) => {
     event.preventDefault()
 
     const trimmedName = form.name.trim()
@@ -529,57 +516,88 @@ function Dashboard() {
     const scheduleTimes = getScheduleTimesFromSlots(scheduleSlots)
 
     if (medicineToEdit) {
-      setMedicineList(current => current.map(m => 
-        m.id === medicineToEdit.id ? {
-          ...m,
-          ...form,
-          scheduleSlots,
-          scheduleTimes,
-          dosesPerDay: scheduleSlots.length,
-          timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(form.timeSlot),
-          startDate: form.startDate || getTodayKey(),
-          updatedAt: Date.now()
-        } : m
-      ))
+      const updatedMed = {
+        ...medicineToEdit,
+        ...form,
+        scheduleSlots,
+        scheduleTimes,
+        dosesPerDay: scheduleSlots.length,
+        timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(form.timeSlot),
+        startDate: form.startDate || getTodayKey(),
+        updatedAt: new Date().getTime()
+      }
+
+      const { data, error } = await supabase
+        .from("medicines")
+        .update(mapToDb(updatedMed))
+        .eq("id", medicineToEdit.id)
+        .select()
+
+      if (error) {
+        console.error("Failed to update medicine:", error)
+        alert("Failed to update medicine. Please try again.")
+        return
+      }
+
+      if (data && data.length > 0) {
+        const updatedRow = normalizeInitialStatus(normalizeMedicine(mapFromDb(data[0])))
+        setMedicineList(current => current.map(m =>
+          m.id === medicineToEdit.id ? updatedRow : m
+        ))
+        // Keep cache in sync
+        medicineCache.update(rows => rows.map(r => r.id === medicineToEdit.id ? data[0] : r))
+      }
     } else {
-      addMedicine()
+      await addMedicine()
     }
 
     closeModal()
   }
 
-  const addMedicine = () => {
-    const now = Date.now()
+  const addMedicine = async () => {
+    
     const scheduleSlots = normalizeScheduleSlots(form)
     const scheduleTimes = getScheduleTimesFromSlots(scheduleSlots)
+    
+    const { data: { session } } = await supabase.auth.getSession()
 
-    setMedicineList((current) => [
-      ...current,
+    const { data, error } = await supabase.from("medicines").insert([
       {
-        id: now,
-        name: form.name,
+        user_id: session.user.id,
+        medicine_name: form.name,
         dosage: form.dosage,
-        scheduleSlots,
-        scheduleTimes,
-        timeSlot: scheduleSlots[0]?.slot || normalizeTimeSlot(form.timeSlot),
         instructions: form.instructions,
-        status: "Upcoming",
-        previousStatus: "Upcoming",
-        dosesPerDay: scheduleSlots.length,
-        frequencyType: form.frequencyType || "Daily",
-        medicineType: form.medicineType || "Tablet",
-        stock: form.stock || 0,
-        customDays: form.customDays || [],
+        medicine_type: form.medicineType,
+        stock: form.stock,
+        doses_per_day: scheduleSlots.length,
+        schedule_times: scheduleTimes,
+        schedule_slots: scheduleSlots,
+        frequency_type: form.frequencyType,
+        custom_days: form.customDays,
         duration: form.duration,
-        startDate: form.startDate || getTodayKey(), // Use centralized utility
-        endDate: form.endDate,
-        notificationSentFor: null,
-        createdAt: now,
-        updatedAt: now,
-        missedFor: null,
-        adherenceHistory: [],
-      },
-    ])
+        start_date: form.startDate || getTodayKey(),
+        end_date: form.endDate?.trim() ? form.endDate : null,
+        status: "Upcoming",
+        previous_status: "Upcoming",
+        archived: false,
+        adherence_history: []
+      }
+    ]).select()
+
+    if (error) {
+      console.error("[Dashboard] Insert error:", error)
+      return
+    }
+
+    if (data && data.length > 0) {
+      const newRow = normalizeInitialStatus(normalizeMedicine(mapFromDb(data[0])))
+      setMedicineList((current) => {
+        const updated = [...current, newRow]
+        return updated
+      })
+      // Keep cache in sync
+      medicineCache.update(rows => (rows ? [...rows, data[0]] : [data[0]]))
+    }
   }
 
   const markMedicineMissed = (medicineId) => {
@@ -620,46 +638,62 @@ function Dashboard() {
     )
   }
 
-  const markMedicineTaken = (medicineId) => {
-    setMedicineList((current) =>
-      current.map((medicine) => {
-        if (medicine.id !== medicineId) {
-          return medicine
-        }
-        
-        const todayKey = getTodayKey() // Use centralized utility
-        const doseToMark = medicine.scheduleTimes.find(t => getDoseStatus(medicine, t) !== "Taken")
+  const markMedicineTaken = async (medicineId) => {
+    const medicineToUpdate = medicineList.find(m => m.id === medicineId);
+    if (!medicineToUpdate) return;
 
-        if (!doseToMark) {
-          // Unmark the last dose of the day if all are completed
-          const lastEntry = (medicine.adherenceHistory || []).find(h => h.date === todayKey && h.time === medicine.scheduleTimes[medicine.scheduleTimes.length - 1]);
-          const lastDoseTime = medicine.scheduleTimes[medicine.scheduleTimes.length - 1]
-          return {
-            ...medicine,
-            stock: (medicine.stock || 0) + (lastEntry?.status === 'Taken' ? 1 : 0),
-            adherenceHistory: (medicine.adherenceHistory || []).filter(
-              h => !(h.date === todayKey && h.time === lastDoseTime)
-            ),
-          }
-        }
+    let updatedMedicine;
+    const todayKey = getTodayKey() // Use centralized utility
+    const doseToMark = medicineToUpdate.scheduleTimes.find(t => getDoseStatus(medicineToUpdate, t) !== "Taken")
 
-        // Filter out any existing entries for this specific time (e.g., if it was previously "Missed")
-        // to ensure the "Taken" status is the only one persisted for this dose window.
-        const cleanHistory = (medicine.adherenceHistory || []).filter(
-          h => !(h.date === todayKey && h.time === doseToMark)
-        )
+    if (!doseToMark) {
+      // Unmark the last dose of the day if all are completed
+      const lastEntry = (medicineToUpdate.adherenceHistory || []).find(h => h.date === todayKey && h.time === medicineToUpdate.scheduleTimes[medicineToUpdate.scheduleTimes.length - 1]);
+      const lastDoseTime = medicineToUpdate.scheduleTimes[medicineToUpdate.scheduleTimes.length - 1]
+      updatedMedicine = {
+        ...medicineToUpdate,
+        stock: (medicineToUpdate.stock || 0) + (lastEntry?.status === 'Taken' ? 1 : 0),
+        adherenceHistory: (medicineToUpdate.adherenceHistory || []).filter(
+          h => !(h.date === todayKey && h.time === lastDoseTime)
+        ),
+        updatedAt: Date.now()
+      }
+    } else {
+      // Filter out any existing entries for this specific time (e.g., if it was previously "Missed")
+      // to ensure the "Taken" status is the only one persisted for this dose window.
+      const cleanHistory = (medicineToUpdate.adherenceHistory || []).filter(
+        h => !(h.date === todayKey && h.time === doseToMark)
+      )
 
-        return {
-          ...medicine,
-          stock: Math.max(0, (medicine.stock || 0) - 1),
-          adherenceHistory: [
-            ...cleanHistory,
-            { date: todayKey, time: doseToMark, status: "Taken" }
-          ],
-          updatedAt: Date.now()
-        }
-      }),
-    )
+      updatedMedicine = {
+        ...medicineToUpdate,
+        stock: Math.max(0, (medicineToUpdate.stock || 0) - 1),
+        adherenceHistory: [
+          ...cleanHistory,
+          { date: todayKey, time: doseToMark, status: "Taken" }
+        ],
+        updatedAt: Date.now()
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("medicines")
+      .update(mapToDb(updatedMedicine))
+      .eq("id", medicineId)
+      .select()
+
+    if (error) {
+      console.error("Supabase error:", error)
+      alert("Failed to update status. Please try again.")
+      return
+    }
+
+    if (data && data.length > 0) {
+      const updatedRow = normalizeInitialStatus(normalizeMedicine(mapFromDb(data[0])))
+      setMedicineList(current => current.map(m => m.id === medicineId ? updatedRow : m))
+      // Keep cache in sync
+      medicineCache.update(rows => rows.map(r => r.id === medicineId ? data[0] : r))
+    }
   }
 
   const openEditModal = (medicine) => {
@@ -682,43 +716,91 @@ function Dashboard() {
     setRefillSuccess(false)
   }
 
-  const confirmRefill = () => {
+  const confirmRefill = async () => {
+    const newStock = (medicineToRefill.stock || 0) + refillAmount;
+    const updatedMedicine = { ...medicineToRefill, stock: newStock, updatedAt: Date.now() };
+    const payload = mapToDb(updatedMedicine);
+
+    const { data, error } = await supabase
+      .from("medicines")
+      .update(payload)
+      .eq("id", medicineToRefill.id)
+      .select()
+
+    if (error) {
+      console.error("[REFILL] Supabase error:", error);
+      alert("Failed to refill medicine. Please try again.");
+      return;
+    }
+
     setRefillSuccess(true)
     setTimeout(() => {
-      setMedicineList(current => current.map(m => 
-        m.id === medicineToRefill.id ? { ...m, stock: (m.stock || 0) + refillAmount } : m
-      ))
+      if (data && data.length > 0) {
+        const updatedRow = normalizeInitialStatus(normalizeMedicine(mapFromDb(data[0])))
+        setMedicineList(current => current.map(m => m.id === medicineToRefill.id ? updatedRow : m))
+        // Keep cache in sync
+        medicineCache.update(rows => rows.map(r => r.id === medicineToRefill.id ? data[0] : r))
+      }
       setMedicineToRefill(null)
       setRefillSuccess(false)
     }, 1200)
   }
 
   const handleRestart = (medicineId) => {
-    setMedicineList(current => current.map(m => 
-      m.id === medicineId ? { 
-        ...m, 
-        startDate: getTodayKey(), 
+    setMedicineList(current => current.map(m =>
+      m.id === medicineId ? {
+        ...m,
+        startDate: getTodayKey(),
         endDate: "", // Reset end date when restarting
         status: "Upcoming",
-        adherenceHistory: [] 
+        adherenceHistory: []
       } : m
+    ))
+    // Keep cache in sync
+    medicineCache.update(rows => rows.map(r =>
+      r.id === medicineId ? {
+        ...r,
+        start_date: getTodayKey(),
+        end_date: null,
+        status: "Upcoming",
+        adherence_history: []
+      } : r
     ))
   }
 
   const handleArchive = (medicineId) => {
-    setMedicineList(current => current.map(m => 
+    setMedicineList(current => current.map(m =>
       m.id === medicineId ? { ...m, archived: !m.archived } : m
+    ))
+    // Keep cache in sync
+    medicineCache.update(rows => rows.map(r =>
+      r.id === medicineId ? { ...r, archived: !r.archived } : r
     ))
   }
 
-  const confirmDeleteMedicine = () => {
+  const confirmDeleteMedicine = async () => {
     if (!medicineToDelete) {
       return
+    }
+
+    const medicineId = medicineToDelete.id;
+
+    const { error } = await supabase
+      .from("medicines")
+      .delete()
+      .eq("id", medicineId);
+
+    if (error) {
+      console.error("Failed to delete medicine:", error);
+      alert("Failed to delete medicine. Please try again.");
+      return;
     }
 
     setMedicineList((current) =>
       current.filter((medicine) => medicine.id !== medicineToDelete.id),
     )
+    // Keep cache in sync
+    medicineCache.update(rows => rows.filter(r => r.id !== medicineId))
     setMedicineToDelete(null)
   }
 
@@ -745,7 +827,7 @@ function Dashboard() {
             {new Date().toLocaleDateString("en-US", { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
           <h1 className="mt-0.5 truncate text-2xl font-black tracking-tight sm:mt-1 sm:text-4xl">
-            {greeting}, Ashhaz 👋
+            {greeting}, {userName || "User"} 👋
           </h1>
         </div>
 
@@ -769,10 +851,10 @@ function Dashboard() {
 
           <div className="flex h-12 min-w-12 items-center justify-center gap-3 rounded-2xl border border-white/10 bg-black/25 px-1.5 shadow-lg shadow-slate-950/10 sm:min-w-0 sm:justify-start sm:px-3 sm:py-2">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 text-sm font-black shadow-lg shadow-emerald-950/30">
-              AA
+              {userName ? userName.charAt(0).toUpperCase() : "U"}
             </div>
             <div className="hidden pr-2 sm:block">
-              <p className="text-sm font-bold">Ashhaz</p>
+              <p className="text-sm font-bold truncate max-w-[100px]">{userName || "User"}</p>
               <p className="text-xs text-slate-400">Care profile</p>
             </div>
           </div>
@@ -861,21 +943,16 @@ function Dashboard() {
                   strokeWidth="8" 
                   fill="transparent" 
                   strokeDasharray={276} 
-                  strokeDashoffset={276 - (276 * (adherenceStats.weeklyPercentage || 0)) / 100} 
+                  strokeDashoffset={276 - (276 * (adherenceStats.todayPercentage || 0)) / 100} 
                   strokeLinecap="round" 
-                  className={`${hasAdherenceData ? 'text-emerald-500' : 'text-white/10'} transition-all duration-1000`} 
+                  className="text-emerald-500 transition-all duration-1000" 
                 />
               </svg>
-              <p className={`${hasAdherenceData ? 'text-lg sm:text-2xl' : 'text-[10px] sm:text-sm'} font-black text-white text-center`}>
-                {hasAdherenceData ? `${adherenceStats.weeklyPercentage}%` : "No Data"}
+              <p className="text-lg sm:text-2xl font-black text-white text-center">
+                {adherenceStats.todayPercentage}%
               </p>
             </div>
-            <p className="mt-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">7-Day Adherence</p>
-            {!hasAdherenceData && (
-              <p className="mt-1 text-[9px] text-slate-500 text-center leading-tight max-w-[120px]">
-                Add medicines to start tracking
-              </p>
-            )}
+            <p className="mt-2 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">TODAY'S ADHERENCE</p>
           </div>
         </div>
 

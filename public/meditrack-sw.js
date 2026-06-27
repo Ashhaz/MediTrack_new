@@ -1,15 +1,12 @@
 self.addEventListener("install", () => {
-  console.log("[MediTrack SW] Installed")
   self.skipWaiting()
 })
 
 self.addEventListener("activate", (event) => {
-  console.log("[MediTrack SW] Activated")
   event.waitUntil(self.clients.claim())
 })
 
 self.addEventListener("notificationclick", (event) => {
-  console.log("[MediTrack SW] Notification clicked", event.notification?.tag)
   event.notification.close()
 
   const targetUrl =

@@ -36,3 +36,31 @@ self.addEventListener("notificationclick", (event) => {
       }),
   )
 })
+
+self.addEventListener("push", (event) => {
+  // This listener prepares the Service Worker for future Firebase/OneSignal integration.
+  // When a push message is received (even if the app is closed), this wakes up the SW.
+  if (event.data) {
+    try {
+      const data = event.data.json()
+      
+      const title = data.title || "MediTrack"
+      const options = {
+        body: data.body || "You have a new notification.",
+        icon: data.icon || "/favicon.svg",
+        badge: data.badge || "/favicon.svg",
+        data: data.data || { url: "/#/dashboard" }
+      }
+      
+      event.waitUntil(self.registration.showNotification(title, options))
+    } catch (e) {
+      // Fallback for plain text push messages
+      event.waitUntil(
+        self.registration.showNotification("MediTrack", {
+          body: event.data.text(),
+          icon: "/favicon.svg"
+        })
+      )
+    }
+  }
+})

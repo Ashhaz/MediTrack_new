@@ -31,6 +31,7 @@ import AddMedicineModal from "../components/AddMedicineModal"
 import CalendarModal from "../components/CalendarModal"
 import MedicineCard from "../components/MedicineCard"
 import NotificationCenter from "../components/NotificationCenter.jsx"
+import NotificationPrompt from "../components/NotificationPrompt.jsx"
 
 import { mapFromDb, mapToDb } from "../utils/medicineMapper.js"
 import { medicineCache } from "../store/medicineCache.js"
@@ -852,6 +853,8 @@ function Dashboard() {
           </div>
         </div>
       </header>
+
+      <NotificationPrompt />
 
       <section
         id="overview"

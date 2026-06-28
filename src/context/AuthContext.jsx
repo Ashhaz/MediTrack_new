@@ -19,39 +19,64 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // ── Step 1: Restore any existing session immediately on mount ──────────
-    // This covers: page refresh, PWA reopen, browser restart.
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setLoading(false);
     });
 
+    const syncOneSignalUser = async (user) => {
+      if (!user) {
+        try {
+          await OneSignal.logout();
+          console.log("[MediTrack] OneSignal logged out");
+        } catch (err) {
+          console.error("[MediTrack] OneSignal logout error:", err);
+        }
+        return;
+      }
+
+      try {
+        // 1. Ensure OneSignal finishes initialization
+        await initOneSignal();
+        console.log("[MediTrack] OneSignal initialized");
+
+        // 2. Check native notification permission
+        const permission = Notification.permission;
+        console.log("[MediTrack] Notification permission:", permission);
+
+        // 3. If already granted but not opted in, opt in to create subscription
+        if (permission === 'granted' && !OneSignal.User.PushSubscription.optedIn) {
+          console.log("[MediTrack] Opting into push subscription...");
+          await OneSignal.User.PushSubscription.optIn();
+          console.log("[MediTrack] Push subscription created");
+        }
+
+        // 4. Check for subscription ID
+        const pushId = OneSignal.User.PushSubscription.id;
+        console.log("[MediTrack] Push subscription ID:", pushId);
+
+        if (!pushId) {
+          console.log("[MediTrack] No push subscription ID, skipping login()");
+          return;
+        }
+
+        // 5. Login
+        await OneSignal.login(user.id);
+        console.log("[MediTrack] Login successful");
+        console.log("[MediTrack] OneSignal User ID:", OneSignal.User.onesignalId);
+
+      } catch (err) {
+        console.error("[MediTrack] Error syncing OneSignal:", err);
+      }
+    };
+
     // ── Step 2: Keep session state in sync with Supabase ──────────────────
-    // This covers: sign-in, sign-out, token refresh, OAuth callbacks.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
-      // Once onAuthStateChange fires for the first time, loading is already
-      // false (set above), so no need to touch it here.
-
-      // Sync user with OneSignal
-      if (session?.user) {
-        try {
-          await OneSignal.login(session.user.id);
-        } catch (err) {
-          console.error("OneSignal login error:", err);
-        }
-      } else {
-        try {
-          await OneSignal.logout();
-        } catch (err) {
-          console.error("OneSignal logout error:", err);
-        }
-      }
+      await syncOneSignalUser(session?.user);
     });
-
-    // Initialize OneSignal
-    initOneSignal();
 
     // Cleanup subscription when the provider unmounts
     return () => subscription.unsubscribe();

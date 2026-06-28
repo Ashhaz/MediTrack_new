@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { initOneSignal } from "../lib/onesignal";
+import OneSignal from 'react-onesignal';
 
 const AuthContext = createContext(null);
 
@@ -27,11 +29,29 @@ export function AuthProvider({ children }) {
     // This covers: sign-in, sign-out, token refresh, OAuth callbacks.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       // Once onAuthStateChange fires for the first time, loading is already
       // false (set above), so no need to touch it here.
+
+      // Sync user with OneSignal
+      if (session?.user) {
+        try {
+          await OneSignal.login(session.user.id);
+        } catch (err) {
+          console.error("OneSignal login error:", err);
+        }
+      } else {
+        try {
+          await OneSignal.logout();
+        } catch (err) {
+          console.error("OneSignal logout error:", err);
+        }
+      }
     });
+
+    // Initialize OneSignal
+    initOneSignal();
 
     // Cleanup subscription when the provider unmounts
     return () => subscription.unsubscribe();

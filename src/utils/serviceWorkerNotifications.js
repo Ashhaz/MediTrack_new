@@ -1,4 +1,6 @@
-const SERVICE_WORKER_FILE = "meditrack-sw.js"
+import OneSignal from 'react-onesignal';
+
+const SERVICE_WORKER_FILE = "OneSignalSDKWorker.js"
 const SERVICE_WORKER_READY_TIMEOUT_MS = 5000
 
 const getServiceWorkerUrl = () =>
@@ -63,8 +65,18 @@ export const requestNotificationPermission = async () => {
   }
 
   try {
-    const permission = await Notification.requestPermission()
+    let permission;
+    // Attempt to use OneSignal's permission request if SDK is ready
+    if (OneSignal && OneSignal.Notifications) {
+      // OneSignal v16 returns boolean
+      const granted = await OneSignal.Notifications.requestPermission();
+      permission = granted ? "granted" : "denied";
+    } else {
+      // Fallback to native browser permission
+      permission = await Notification.requestPermission();
+    }
     return permission
+
   } catch (error) {
     console.error("[MediTrack Notifications] Notification permission request failed", error)
     return Notification.permission
